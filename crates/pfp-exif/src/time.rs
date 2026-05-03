@@ -15,10 +15,19 @@ pub(crate) fn set_datetime_original(metadata: &mut Metadata, dto: &str) -> Resul
     Ok(())
 }
 
-pub(crate) fn validate_dto_format(_s: &str) -> Result<(), ExifError> {
-    // RED stub: GREEN commit replaces the body with the real validator. For now
-    // accept everything so the test harness gets to run; the rejecting tests
-    // will fail and drive the GREEN commit's logic.
+pub(crate) fn validate_dto_format(s: &str) -> Result<(), ExifError> {
+    if s.len() != 19 {
+        return Err(ExifError::InvalidDateTime(s.to_string()));
+    }
+    let ok = s.bytes().enumerate().all(|(i, b)| match i {
+        4 | 7 => b == b':',
+        10 => b == b' ',
+        13 | 16 => b == b':',
+        _ => b.is_ascii_digit(),
+    });
+    if !ok {
+        return Err(ExifError::InvalidDateTime(s.to_string()));
+    }
     Ok(())
 }
 

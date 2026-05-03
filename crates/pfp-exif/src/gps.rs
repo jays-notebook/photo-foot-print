@@ -22,13 +22,39 @@ pub struct DmsRational {
 ///   latitude  -> ('N', 'S')
 ///   longitude -> ('E', 'W')
 pub fn signed_deg_to_rational_with_ref(
-    _value: f64,
-    _positive_ref: char,
-    _negative_ref: char,
+    value: f64,
+    positive_ref: char,
+    negative_ref: char,
 ) -> (DmsRational, char) {
-    // RED stub: returns a placeholder that fails the four-quadrant tests.
-    // GREEN commit replaces the body with the real conversion.
-    todo!("RED stub: implement in GREEN commit")
+    let r = if value >= 0.0 {
+        positive_ref
+    } else {
+        negative_ref
+    };
+    let abs = value.abs();
+    let deg_whole = abs.trunc() as u32;
+    let min_full = (abs - deg_whole as f64) * 60.0;
+    let min_whole = min_full.trunc() as u32;
+    let sec_full = (min_full - min_whole as f64) * 60.0;
+    // Cap precision at 1e-4 of an arc-second; matches camera EXIF style and
+    // PITFALLS.md §11 "GPS Precision Pseudo-Honesty".
+    let sec_scaled = (sec_full * 10_000.0).round() as u32;
+
+    let dms = DmsRational {
+        deg: uR64 {
+            nominator: deg_whole,
+            denominator: 1,
+        },
+        min: uR64 {
+            nominator: min_whole,
+            denominator: 1,
+        },
+        sec: uR64 {
+            nominator: sec_scaled,
+            denominator: 10_000,
+        },
+    };
+    (dms, r)
 }
 
 #[cfg(test)]

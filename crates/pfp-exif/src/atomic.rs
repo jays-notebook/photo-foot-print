@@ -1,10 +1,11 @@
-//! Atomic write: temp file in the target's parent dir, write, fsync, F_FULLFSYNC,
-//! rename, parent fsync.
+//! Atomic write: temp file in the target's parent dir, then rename. Plan 03
+//! upgrades the body to add a media-level flush (Apple's full-fsync fcntl) and
+//! a parent-directory fsync.
 //!
-//! NOTE (Plan 02): this file ships a *stub* body that does NOT use `F_FULLFSYNC`
-//! and does NOT call `fsync` on the parent directory. Plan 03 replaces the body
-//! with the full durable version (and adds the `fault-injection` Cargo feature
-//! plus a fault-injection module).
+//! NOTE (Plan 02): this file ships a *stub* body that does NOT call any
+//! disk-level flush nor `fsync` on the parent directory. Plan 03 replaces the
+//! body with the full durable version (and adds the `fault-injection` Cargo
+//! feature plus a fault-injection module).
 //!
 //! Signature is LOCKED -- Plan 03 does NOT change it. This plan's tests continue
 //! to pass after Plan 03 lands.
