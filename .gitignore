@@ -27,3 +27,6 @@ Thumbs.db
 # Claude Code (personal-scope settings)
 .claude/settings.local.json
 **/audit-log.jsonl
+
+# Phase 2 — folder-local thumbnail cache (D-17).
+**/.pfp-thumbs/

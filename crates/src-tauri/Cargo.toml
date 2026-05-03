@@ -22,9 +22,19 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-# Phase 1 lib crate dep -- only pfp-exif is implemented this phase. Phase 2
-# will add `pfp-photos = { path = "../pfp-photos" }` and so on.
+# Phase 2 -- folder + photo list dependencies.
+tauri-plugin-dialog = { workspace = true }
+sha2 = { workspace = true }                     # for path-hash id used by the pfp-thumb:// id-map
 pfp-exif = { path = "../pfp-exif" }
+pfp-photos = { path = "../pfp-photos" }
+pfp-state = { path = "../pfp-state" }
+
+# Tokio is pulled transitively by tauri's `default` runtime feature, but we
+# need explicit Semaphore + spawn_blocking access from our async commands.
+tokio = { version = "1", features = ["sync", "rt", "time"] }
+
+# HTTP types for the URI scheme handler responses.
+http = "1"
 
 [dev-dependencies]
 # For the headless ipc_smoke integration test.

@@ -24,6 +24,15 @@ pub enum WireError {
     /// fixtures dir. Phase 3 will widen this to user-opened folders.
     #[error("path traversal rejected: {detail}")]
     PathTraversal { detail: String },
+
+    /// Phase 2: pfp-photos pipeline error (folder enumeration, JPEG validation,
+    /// thumbnail decode, cache write).
+    #[error("photos error: {detail}")]
+    Photos { detail: String },
+
+    /// Phase 2: pfp-state persistence error (state.json read/write).
+    #[error("state error: {detail}")]
+    State { detail: String },
 }
 
 impl From<pfp_exif::error::ExifError> for WireError {
@@ -37,6 +46,22 @@ impl From<pfp_exif::error::ExifError> for WireError {
 impl From<std::io::Error> for WireError {
     fn from(e: std::io::Error) -> Self {
         WireError::Io {
+            detail: e.to_string(),
+        }
+    }
+}
+
+impl From<pfp_photos::error::PhotosError> for WireError {
+    fn from(e: pfp_photos::error::PhotosError) -> Self {
+        WireError::Photos {
+            detail: e.to_string(),
+        }
+    }
+}
+
+impl From<pfp_state::StateError> for WireError {
+    fn from(e: pfp_state::StateError) -> Self {
+        WireError::State {
             detail: e.to_string(),
         }
     }
