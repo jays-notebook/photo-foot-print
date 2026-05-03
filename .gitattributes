@@ -1,0 +1,7 @@
+# Git LFS: store DSLR fixture JPEGs as binary blobs in LFS, not in the git
+# object database. Keeps the repo lean; every clone gets the fixtures.
+tests/fixtures/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+
+# Keep .planning/ markdown as plain text.
+.planning/** text eol=lf
