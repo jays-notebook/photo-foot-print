@@ -1,0 +1,10 @@
+[package]
+name = "pfp-tiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Reserved for Phase 3 — no deps yet.

@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/src-tauri",
+    "crates/pfp-exif",
+    "crates/pfp-photos",
+    "crates/pfp-tiles",
+    "crates/pfp-state",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["jay <jykim.loa2000@gmail.com>"]
+rust-version = "1.77.2"
+
+[workspace.dependencies]
+# EXIF
+little_exif = "0.6.23"
+kamadak-exif = "0.6.1"
+
+# Atomic write
+tempfile = "3"
+libc = "0.2"
+
+# Errors / serde
+thiserror = "1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Tauri (used only by src-tauri host; declared here so plan 04 picks them up)
+tauri = { version = "2", features = [] }
+tauri-build = "2"
+
+[profile.release]
+strip = true
+lto = "thin"

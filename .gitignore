@@ -1,17 +1,29 @@
-# Rust / Cargo
-/target/
+# Rust
+target/
+Cargo.lock.bak
+**/*.tmp
+*.pfp-tmp-*
 **/*.rs.bk
 
-# Claude Code (personal-scope settings)
-.claude/settings.local.json
-**/audit-log.jsonl
+# Tauri
+crates/src-tauri/gen/
+crates/src-tauri/target/
 
+# Frontend
+node_modules/
+dist/
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Editors
-.vscode/
 .idea/
+.vscode/
 *.swp
+
+# Local env (none committed for v1, but reserve)
+.env
+.env.local
+
+# Claude Code (personal-scope settings)
+.claude/settings.local.json
+**/audit-log.jsonl

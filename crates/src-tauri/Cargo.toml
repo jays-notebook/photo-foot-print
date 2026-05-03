@@ -1,0 +1,17 @@
+[package]
+name = "photo-foot-print"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# Phase 1 Plan 01 / Task 1 — minimal placeholder so the workspace loads.
+# Task 2 of this same plan replaces this file with the real Tauri host manifest
+# (build.rs + tauri-build + crate-type cdylib/staticlib/rlib + tauri dep).
+
+[lib]
+name = "app_lib"
+path = "src/lib.rs"
+
+[dependencies]
