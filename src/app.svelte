@@ -51,6 +51,19 @@
       bootstrapError = `Bootstrap failed: ${formatError(e)}`;
     }
 
+    // WR-09: defensively detach any prior listener before registering a
+    // fresh one. In production `onMount` runs once, but Vite HMR
+    // re-runs the script block in dev and would otherwise leak handlers
+    // that keep mutating `thumbReady` / `thumbFailed` for ids belonging
+    // to a previous folder load.
+    if (unlistenThumbReady) {
+      unlistenThumbReady();
+      unlistenThumbReady = null;
+    }
+    if (unlistenThumbFailed) {
+      unlistenThumbFailed();
+      unlistenThumbFailed = null;
+    }
     unlistenThumbReady = await onThumbnailReady((id) => {
       // Increment a reload counter so PhotoRow's <img src> remounts.
       thumbReady = { ...thumbReady, [id]: (thumbReady[id] ?? 0) + 1 };
