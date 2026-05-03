@@ -1,127 +1,152 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { onMount, onDestroy } from "svelte";
+  import {
+    getAppState,
+    listFolder,
+    onThumbnailReady,
+    type FolderListing,
+    type PhotoSummary,
+    formatError,
+  } from "./lib/ipc";
+  import Toolbar from "./lib/toolbar/Toolbar.svelte";
+  import PhotoList from "./lib/list/PhotoList.svelte";
+  import DetailPane from "./lib/detail/DetailPane.svelte";
+  import EmptyState from "./lib/list/EmptyState.svelte";
+  import ThumbCacheBanner from "./lib/list/ThumbCacheBanner.svelte";
+  import type { UnlistenFn } from "@tauri-apps/api/event";
 
-  interface SummaryDto {
-    path: string;
-    file_name: string;
-    has_gps: boolean;
-    capture_time: string | null;
-  }
-
-  // Discriminated union mirroring src-tauri's WireError.
-  type WireError =
-    | { kind: "io"; detail: string }
-    | { kind: "exif"; detail: string }
-    | { kind: "path_traversal"; detail: string };
-
-  type Row =
-    | { kind: "ok"; path: string; summary: SummaryDto }
-    | { kind: "err"; path: string; error: WireError | string };
-
-  let loading = $state(true);
-  let rows: Row[] = $state([]);
+  // ----- Reactive state -----
+  let listing: FolderListing | null = $state(null);
+  let loading = $state(false);
   let bootstrapError: string | null = $state(null);
+  let selectedId: string | null = $state(null);
+  // EmptyState message — null = first launch, string = "previous folder not found: {path}"
+  let emptyStateNote: string | null = $state(null);
+  // Banner dismissal lasts for the session. Reset on every successful load
+  // where thumb_cache_writable is false again (per UI-SPEC).
+  let bannerDismissed = $state(false);
+  // Thumbnail readiness map: id -> reload counter (force <img> re-fetch when set).
+  let thumbReady: Record<string, number> = $state({});
 
-  async function loadFixtures() {
+  let unlistenThumbReady: UnlistenFn | null = null;
+
+  // ----- Bootstrap (D-13) -----
+  onMount(async () => {
     try {
-      const fixtures = await invoke<string[]>("list_fixtures");
-      const collected: Row[] = [];
-      for (const path of fixtures) {
-        try {
-          const summary = await invoke<SummaryDto>("read_exif_summary", { path });
-          collected.push({ kind: "ok", path, summary });
-        } catch (err) {
-          collected.push({
-            kind: "err",
-            path,
-            error:
-              typeof err === "object" && err !== null
-                ? (err as WireError)
-                : String(err),
-          });
-        }
+      const appState = await getAppState();
+      const lf = appState.last_folder;
+      if (lf.kind === "available") {
+        await loadFolder(lf.path);
+      } else if (lf.kind === "missing") {
+        emptyStateNote = `Previous folder not found: ${lf.path}`;
       }
-      rows = collected;
-    } catch (err) {
-      bootstrapError = `Failed to list fixtures: ${JSON.stringify(err)}`;
+      // kind: "none" -> no note, just first-launch EmptyState.
+    } catch (e) {
+      bootstrapError = `Bootstrap failed: ${formatError(e)}`;
+    }
+
+    unlistenThumbReady = await onThumbnailReady((id) => {
+      // Increment a reload counter so PhotoRow's <img src> remounts.
+      thumbReady = { ...thumbReady, [id]: (thumbReady[id] ?? 0) + 1 };
+    });
+  });
+
+  onDestroy(() => {
+    if (unlistenThumbReady) unlistenThumbReady();
+  });
+
+  // ----- Folder load (called from Toolbar) -----
+  async function loadFolder(path: string) {
+    loading = true;
+    bootstrapError = null;
+    emptyStateNote = null;
+    selectedId = null;
+    bannerDismissed = false;
+    try {
+      listing = await listFolder(path);
+    } catch (e) {
+      bootstrapError = formatError(e);
+      listing = null;
     } finally {
       loading = false;
     }
   }
 
-  // Fire-and-forget on mount. Svelte 5 runes: top-level await is allowed in
-  // <script> but loadFixtures() returns a promise we deliberately do not block on.
-  loadFixtures();
+  // ----- Selection sync -----
+  let selectedSummary: PhotoSummary | null = $derived(
+    listing?.items.find((i) => i.id === selectedId) ?? null,
+  );
+
+  // ----- Banner visibility -----
+  let showBanner = $derived(
+    listing !== null && !listing.thumb_cache_writable && !bannerDismissed,
+  );
 </script>
 
-<main>
-  <h1>photo-foot-print — Phase 1 demo</h1>
+<Toolbar
+  folderPath={listing?.folder_path ?? null}
+  {loading}
+  onOpen={loadFolder}
+  onRefresh={() => listing && loadFolder(listing.folder_path)}
+/>
 
-  <p class="subtitle">
-    EXIF summaries read from <code>tests/fixtures/{'{'}sony,canon,nikon{'}'}/sample.jpg</code>
-    via the <code>read_exif_summary</code> IPC command.
-  </p>
-
-  {#if loading}
-    <p>Loading fixture summaries…</p>
-  {:else if bootstrapError}
-    <p class="error">{bootstrapError}</p>
-  {:else if rows.length === 0}
-    <p class="empty-state">
-      No fixtures supplied yet. See <code>docs/FIXTURES.md</code> for the
-      <strong>[needs_user_action]</strong> checklist.
-    </p>
-  {:else}
-    <ul>
-      {#each rows as row}
-        {#if row.kind === "ok"}
-          <li>
-            <strong>{row.summary.file_name}</strong>
-            — {row.summary.has_gps ? "has GPS" : "missing GPS"}
-            {#if row.summary.capture_time}
-              — {row.summary.capture_time}
-            {:else}
-              — no DateTimeOriginal
-            {/if}
-          </li>
-        {:else}
-          <li class="error">
-            <strong>{row.path}</strong>: ERROR
-            {typeof row.error === "string"
-              ? row.error
-              : `${row.error.kind}: ${row.error.detail}`}
-          </li>
-        {/if}
-      {/each}
-    </ul>
+<div class="list-pane">
+  {#if showBanner}
+    <ThumbCacheBanner ondismiss={() => (bannerDismissed = true)} />
   {/if}
-</main>
+
+  {#if bootstrapError}
+    <p class="error">{bootstrapError}</p>
+  {:else if !listing && !loading}
+    <EmptyState note={emptyStateNote} />
+  {:else if listing && listing.items.length === 0 && !loading}
+    <EmptyState
+      note={null}
+      heading="No JPEGs in this folder."
+      body="This folder has no readable JPEGs. Pick a different folder, or add files and refresh."
+    />
+  {:else if listing}
+    <PhotoList
+      items={listing.items}
+      footer={listing.footer}
+      {selectedId}
+      {thumbReady}
+      {loading}
+      onSelect={(id) => (selectedId = id)}
+    />
+  {:else}
+    <p class="loading">Loading...</p>
+  {/if}
+</div>
+
+<div class="detail-pane">
+  <DetailPane summary={selectedSummary} />
+</div>
 
 <style>
-  .subtitle {
-    color: #666;
-    font-size: 0.9rem;
+  .list-pane {
+    grid-area: list;
+    border-right: 1px solid var(--border);
+    background: var(--bg-dominant);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
-  .empty-state {
-    padding: 1rem;
-    background: #fff8e1;
-    border-radius: 4px;
+
+  .detail-pane {
+    grid-area: detail;
+    background: var(--bg-dominant);
+    overflow: auto;
+    padding: var(--sp-md);
   }
-  ul {
-    list-style: none;
-    padding: 0;
-  }
-  li {
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #eee;
-  }
+
   .error {
-    color: #b00020;
+    padding: var(--sp-md);
+    color: var(--destructive);
   }
-  code {
-    background: #f4f4f4;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
-    font-size: 0.9em;
+
+  .loading {
+    padding: var(--sp-md);
+    color: var(--text-muted);
   }
 </style>
