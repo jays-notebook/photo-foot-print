@@ -16,12 +16,12 @@ test:
 	cargo test --workspace
 
 test-gate:
-	# Phase 1 gate: MakerNote-preservation fixture suite.
+	# Phase 1 gate: metadata-preservation fixture suite (post-D-10).
 	# Requires:
-	#   - tests/fixtures/{sony,canon,nikon}/sample.jpg supplied (see docs/FIXTURES.md)
+	#   - tests/fixtures/scanner/*.jpg supplied (see docs/FIXTURES.md)
 	#   - exiftool on PATH (`brew install exiftool`)
 	# A green run satisfies ROADMAP.md Phase 1 success criterion #3.
-	cargo test -p pfp-exif --test makernote_diff -- --include-ignored
+	cargo test -p pfp-exif --test metadata_preservation -- --include-ignored
 
 test-fault:
 	# Plan 03's fault-injection durability test (Phase 1 criterion #4).
