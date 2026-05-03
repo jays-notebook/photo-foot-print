@@ -1,0 +1,29 @@
+[package]
+name = "photo-foot-print"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "A native macOS desktop app for one-photo-at-a-time geotagging of camera JPEGs."
+default-run = "photo-foot-print"
+
+[lib]
+# Tauri 2 mobile-friendly default; matches v2.tauri.app project structure docs.
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true, features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Plan 04 will add:
+#   pfp-exif = { path = "../pfp-exif" }
+# Adding it now would force this crate to compile against an empty pfp-exif (fine),
+# but Plan 04 also wires the IPC commands so we keep this dep declaration there for
+# locality.
