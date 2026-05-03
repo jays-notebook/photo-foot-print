@@ -4,6 +4,8 @@
 
 # Claude Code (personal-scope settings)
 .claude/settings.local.json
+**/audit-log.jsonl
+
 
 # OS
 .DS_Store
