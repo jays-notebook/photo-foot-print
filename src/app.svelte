@@ -4,6 +4,7 @@
     getAppState,
     listFolder,
     onThumbnailReady,
+    onThumbnailFailed,
     type FolderListing,
     type PhotoSummary,
     formatError,
@@ -27,8 +28,13 @@
   let bannerDismissed = $state(false);
   // Thumbnail readiness map: id -> reload counter (force <img> re-fetch when set).
   let thumbReady: Record<string, number> = $state({});
+  // WR-06: per-id failure tick. PhotoList watches this and drops failed
+  // ids from its in-flight `requested` set so the IntersectionObserver
+  // can retry on next viewport entry (transient USB / quota recovery).
+  let thumbFailed: Record<string, number> = $state({});
 
   let unlistenThumbReady: UnlistenFn | null = null;
+  let unlistenThumbFailed: UnlistenFn | null = null;
 
   // ----- Bootstrap (D-13) -----
   onMount(async () => {
@@ -49,10 +55,18 @@
       // Increment a reload counter so PhotoRow's <img src> remounts.
       thumbReady = { ...thumbReady, [id]: (thumbReady[id] ?? 0) + 1 };
     });
+    unlistenThumbFailed = await onThumbnailFailed((id, reason) => {
+      console.warn("[thumbnail-failed]", id, reason);
+      // Bump the per-id tick. PhotoList's $effect on `thumbFailed`
+      // removes the id from its `requested` set and re-observes the row,
+      // so the next viewport entry triggers a retry.
+      thumbFailed = { ...thumbFailed, [id]: (thumbFailed[id] ?? 0) + 1 };
+    });
   });
 
   onDestroy(() => {
     if (unlistenThumbReady) unlistenThumbReady();
+    if (unlistenThumbFailed) unlistenThumbFailed();
   });
 
   // ----- Folder load (called from Toolbar) -----
@@ -113,6 +127,7 @@
       footer={listing.footer}
       {selectedId}
       {thumbReady}
+      {thumbFailed}
       {loading}
       onSelect={(id) => (selectedId = id)}
     />

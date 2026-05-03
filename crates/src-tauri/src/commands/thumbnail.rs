@@ -26,6 +26,14 @@ struct ThumbnailReadyPayload {
     id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ThumbnailFailedPayload {
+    id: String,
+    /// Short, dev-facing reason. Frontend logs it; the row keeps the
+    /// placeholder icon per UI-SPEC.
+    reason: String,
+}
+
 #[tauri::command]
 pub async fn request_thumbnail(
     state: State<'_, TauriAppState>,
@@ -118,10 +126,20 @@ pub async fn request_thumbnail(
             }
             Err(e) => {
                 eprintln!("[request_thumbnail] decode failed for {id_for_task}: {e}");
-                // No event emitted; UI keeps placeholder. Per UI-SPEC interaction
-                // contract: the row keeps the placeholder icon persistently.
-                // RESEARCH §Question 7 explicitly recommends SKIP a separate
-                // "thumbnail-failed" event for v1.
+                // WR-06: emit thumbnail-failed so the frontend can drop the
+                // id from its `requested` set and let the IntersectionObserver
+                // retry on next viewport entry. Without this event, a transient
+                // failure (USB reconnect, quota recovery) would never re-attempt
+                // for the lifetime of the folder load. The row still keeps the
+                // placeholder per UI-SPEC -- the event only resets the dedup
+                // bookkeeping, it does not change the visible row state.
+                let _ = app_for_task.emit(
+                    "thumbnail-failed",
+                    ThumbnailFailedPayload {
+                        id: id_for_task.clone(),
+                        reason: e.to_string(),
+                    },
+                );
             }
         }
     });

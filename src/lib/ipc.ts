@@ -74,6 +74,11 @@ export interface ThumbnailReadyPayload {
   id: string;
 }
 
+export interface ThumbnailFailedPayload {
+  id: string;
+  reason: string;
+}
+
 // ============================================================================
 // Typed invoke wrappers
 // ============================================================================
@@ -108,6 +113,17 @@ export function onThumbnailReady(
 ): Promise<UnlistenFn> {
   return listen<ThumbnailReadyPayload>("thumbnail-ready", (e) => {
     handler(e.payload.id);
+  });
+}
+
+/** WR-06: subscribe to per-id decode failures so the frontend can drop
+ *  the id from its in-flight set and let the IntersectionObserver retry
+ *  on next viewport entry. The row still keeps the placeholder icon. */
+export function onThumbnailFailed(
+  handler: (id: string, reason: string) => void,
+): Promise<UnlistenFn> {
+  return listen<ThumbnailFailedPayload>("thumbnail-failed", (e) => {
+    handler(e.payload.id, e.payload.reason);
   });
 }
 

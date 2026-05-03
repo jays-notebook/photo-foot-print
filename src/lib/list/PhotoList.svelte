@@ -14,11 +14,22 @@
     footer: FolderFooter;
     selectedId: string | null;
     thumbReady: Record<string, number>;
+    /** WR-06: per-id failure tick from app.svelte. When the tick for an
+     *  id changes, drop the id from `requested` and re-observe the row
+     *  so the IntersectionObserver retries on next viewport entry. */
+    thumbFailed: Record<string, number>;
     loading: boolean;
     onSelect: (id: string) => void;
   }
-  let { items, footer, selectedId, thumbReady, loading, onSelect }: Props =
-    $props();
+  let {
+    items,
+    footer,
+    selectedId,
+    thumbReady,
+    thumbFailed,
+    loading,
+    onSelect,
+  }: Props = $props();
 
   let listEl: HTMLElement | null = $state(null);
   let observer: IntersectionObserver | null = null;
@@ -63,6 +74,26 @@
     observer.disconnect();
     const rows = listEl.querySelectorAll(".row-anchor");
     rows.forEach((r) => observer!.observe(r));
+  });
+
+  // WR-06: watch the per-id failure tick. For each id whose tick is
+  // non-zero, drop it from `requested` and (if its row is still in the
+  // DOM) re-observe so the next viewport entry retries the request.
+  // Tracking ticks is per-id so a second failure for the same id also
+  // re-triggers retry (Map-of-counters, not Set-of-ids).
+  let lastSeenFailTick: Map<string, number> = new Map();
+  $effect(() => {
+    if (!listEl) return;
+    for (const [id, tick] of Object.entries(thumbFailed)) {
+      if (lastSeenFailTick.get(id) === tick) continue;
+      lastSeenFailTick.set(id, tick);
+      requested.delete(id);
+      if (!observer) continue;
+      const row = listEl.querySelector(
+        `.row-anchor[data-photo-id="${CSS.escape(id)}"]`,
+      );
+      if (row) observer.observe(row);
+    }
   });
 
   // Keyboard nav (UI-SPEC: arrow up/down moves selection, wrapping).
