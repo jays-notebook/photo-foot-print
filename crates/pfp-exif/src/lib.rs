@@ -2,8 +2,10 @@
 //!
 //! D-08 invariant: zero `tauri::*` symbols. Pure Rust on top of `little_exif`.
 //! Used by:
-//!   - `crates/src-tauri/src/commands/exif.rs` (Plan 04) -- thin command wrappers
-//!   - `crates/pfp-photos`              (Phase 2) -- reuses `read_summary` for badges
+//!   - `crates/src-tauri/src/commands/exif.rs`   (Plan 04) -- thin command wrappers
+//!   - `crates/src-tauri/src/commands/folder.rs` (Plan 02-04) -- read_photo_meta IPC
+//!   - `crates/pfp-photos`                       (Phase 2)   -- reuses summary + detail
+//!     for the list-row badge (FOLDER-03) and the detail pane (EXIF-01, EXIF-02)
 //!
 //! Architectural rules:
 //!   - GPS magnitudes are UNSIGNED rationals; sign lives in the Ref tag (PITFALLS §4).
@@ -12,15 +14,21 @@
 //!     replace only the EXIF APP1 segment. MakerNotes survive byte-for-byte
 //!     (Phase 1 success criterion #3).
 //!   - All writes go through `crate::atomic::write_via_temp` (Plan 03 makes it durable).
+//!   - Phase 2 (D-21, D-22, D-24): the strict-4 GPS validity predicate and the
+//!     validated `DateTimeOriginal` filter live in this crate; Plan 02 / Plan 04
+//!     consume them via the `is_gps_valid`, `gps_signed_decimal`, and
+//!     `read_detail` re-exports below.
 
 pub mod atomic;
+pub mod detail;
 pub mod error;
 mod gps;
 pub mod summary;
 mod time;
 
+pub use crate::detail::{read_detail, PhotoDetail};
 pub use crate::error::ExifError;
-pub use crate::summary::{read_summary, ExifSummary};
+pub use crate::summary::{gps_signed_decimal, is_gps_valid, read_summary, ExifSummary};
 
 use std::path::Path;
 
@@ -87,10 +95,7 @@ pub fn write_gps(
         }
 
         metadata.write_to_file(tmp_path).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("little_exif write: {e}"),
-            )
+            std::io::Error::other(format!("little_exif write: {e}"))
         })?;
 
         Ok(())
