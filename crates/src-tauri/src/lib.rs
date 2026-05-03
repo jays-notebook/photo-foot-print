@@ -74,4 +74,84 @@ mod tests {
         let we: WireError = se.into();
         assert!(matches!(we, WireError::State { .. }));
     }
+
+    /// Plan 02-04 Task 2 RED gate: pin the wire DTO shapes for folder.rs
+    /// and state.rs. The wire DTOs are the IPC contract -- a rename surfaces
+    /// here before it surfaces in the Svelte type-import.
+    #[test]
+    fn folder_wire_dtos_have_expected_shape() {
+        use crate::commands::folder::{
+            FolderFooter, FolderListing, GpsCoord, PhotoMeta, PhotoSummary,
+        };
+
+        let s = PhotoSummary {
+            id: "abc".to_string(),
+            file_name: "x.jpg".to_string(),
+            has_gps: false,
+            capture_time: None,
+            size_bytes: 0,
+            mtime_unix: 0,
+        };
+        // PhotoSummary must NOT carry absolute_path at the wire boundary.
+        // (Compile-time check: only the six fields above are reachable.)
+        let _json = serde_json::to_string(&s).unwrap();
+
+        let f = FolderFooter {
+            total_jpegs: 0,
+            non_image_hidden: 0,
+            read_failed: 0,
+        };
+        let _ = serde_json::to_string(&f).unwrap();
+
+        let l = FolderListing {
+            folder_path: "/tmp".to_string(),
+            items: vec![],
+            footer: f,
+            thumb_cache_writable: true,
+        };
+        let _ = serde_json::to_string(&l).unwrap();
+
+        let m = PhotoMeta {
+            id: "abc".to_string(),
+            file_name: "x.jpg".to_string(),
+            gps: Some(GpsCoord {
+                lat: 35.0,
+                lng: 139.0,
+            }),
+            altitude_m: Some(12.5),
+            capture_time: Some("2025:01:01 12:00:00".to_string()),
+            dimensions: None,
+        };
+        let _ = serde_json::to_string(&m).unwrap();
+    }
+
+    #[test]
+    fn state_wire_dtos_have_expected_shape() {
+        use crate::commands::state::{AppStateDto, LastFolderStatus};
+
+        // All three variants must construct.
+        let n = AppStateDto {
+            last_folder: LastFolderStatus::None,
+        };
+        let s = serde_json::to_string(&n).unwrap();
+        // serde tag = "kind", rename_all = "snake_case"
+        assert!(s.contains("\"kind\":\"none\""), "got: {s}");
+
+        let a = AppStateDto {
+            last_folder: LastFolderStatus::Available {
+                path: "/tmp/x".to_string(),
+            },
+        };
+        let s = serde_json::to_string(&a).unwrap();
+        assert!(s.contains("\"kind\":\"available\""), "got: {s}");
+        assert!(s.contains("\"path\":\"/tmp/x\""), "got: {s}");
+
+        let m = AppStateDto {
+            last_folder: LastFolderStatus::Missing {
+                path: "/missing".to_string(),
+            },
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        assert!(s.contains("\"kind\":\"missing\""), "got: {s}");
+    }
 }
