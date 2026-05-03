@@ -59,3 +59,33 @@ pub fn read_summary(target: &Path) -> Result<ExifSummary, ExifError> {
         capture_time,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use little_exif::exif_tag::ExifTag;
+    use little_exif::metadata::Metadata;
+
+    #[test]
+    fn read_validated_dto_accepts_valid() {
+        let mut metadata = Metadata::new();
+        metadata.set_tag(ExifTag::DateTimeOriginal("2026:05:03 09:10:33".to_string()));
+        assert_eq!(
+            read_validated_dto(&metadata).as_deref(),
+            Some("2026:05:03 09:10:33")
+        );
+    }
+
+    #[test]
+    fn read_validated_dto_rejects_malformed() {
+        let mut metadata = Metadata::new();
+        metadata.set_tag(ExifTag::DateTimeOriginal("not a date".to_string()));
+        assert!(read_validated_dto(&metadata).is_none());
+    }
+
+    #[test]
+    fn read_validated_dto_returns_none_when_absent() {
+        let metadata = Metadata::new();
+        assert!(read_validated_dto(&metadata).is_none());
+    }
+}
