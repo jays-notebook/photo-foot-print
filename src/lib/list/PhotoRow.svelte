@@ -18,6 +18,20 @@
       : `pfp-thumb://${summary.id}`,
   );
 
+  // WR-08: previously the <img> visibility was toggled by writing to
+  // `element.style.visibility` from onload/onerror handlers. Because
+  // each `{#each ... (item.id)}` keeps the same DOM element across
+  // src changes, the inline-style override from a prior onerror leaked
+  // through the next src change until the new request resolved -- so
+  // the user could see a brief hidden flicker on every reload. Replace
+  // with a `$state` flag that Svelte controls deterministically; reset
+  // it to `false` whenever the src changes so each load starts hidden.
+  let loaded = $state(false);
+  $effect(() => {
+    void imgSrc;
+    loaded = false;
+  });
+
   let captureLabel = $derived(summary.capture_time ?? "unknown");
   let gpsLabel = $derived(summary.has_gps ? "has GPS" : "missing GPS");
   let ariaName = $derived(
@@ -55,14 +69,9 @@
       width="48"
       height="48"
       loading="lazy"
-      onerror={(e) => {
-        const t = e.currentTarget as HTMLImageElement;
-        t.style.visibility = "hidden";
-      }}
-      onload={(e) => {
-        const t = e.currentTarget as HTMLImageElement;
-        t.style.visibility = "visible";
-      }}
+      class:loaded
+      onload={() => (loaded = true)}
+      onerror={() => (loaded = false)}
     />
   </div>
   <div class="meta">
@@ -108,6 +117,9 @@
     height: 100%;
     object-fit: cover;
     visibility: hidden;
+  }
+  .thumb img.loaded {
+    visibility: visible;
   }
   .thumb .placeholder {
     position: absolute;
