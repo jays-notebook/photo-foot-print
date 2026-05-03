@@ -160,4 +160,21 @@ mod tests {
         let s = serde_json::to_string(&m).unwrap();
         assert!(s.contains("\"kind\":\"missing\""), "got: {s}");
     }
+
+    /// Plan 02-04 Task 3 RED gate: pin RequestThumbnailAck wire shape.
+    /// `#[serde(tag = "status", rename_all = "snake_case")]` is the IPC
+    /// contract for the Svelte frontend's request_thumbnail handler.
+    #[test]
+    fn request_thumbnail_ack_serializes_with_status_tag() {
+        use crate::commands::thumbnail::RequestThumbnailAck;
+
+        let s = serde_json::to_string(&RequestThumbnailAck::Ready).unwrap();
+        assert!(s.contains("\"status\":\"ready\""), "got: {s}");
+
+        let s = serde_json::to_string(&RequestThumbnailAck::InFlight).unwrap();
+        assert!(s.contains("\"status\":\"in_flight\""), "got: {s}");
+
+        let s = serde_json::to_string(&RequestThumbnailAck::Queued).unwrap();
+        assert!(s.contains("\"status\":\"queued\""), "got: {s}");
+    }
 }

@@ -44,3 +44,50 @@ fn read_summary_works_on_supplied_fixtures() {
         eprintln!("No fixtures supplied — see docs/FIXTURES.md. ipc_smoke noop.");
     }
 }
+
+/// Phase 2 lib-crate smoke: exercise the path Plan 04's `list_folder` and
+/// `read_photo_meta` IPC commands delegate to (`pfp_photos::list_folder` +
+/// `pfp_exif::read_detail`) without spinning up a webview.
+///
+/// The IPC command bodies themselves are not tested here -- consistent with
+/// Phase 1's testing seam (RESEARCH §Question 10 "What we deliberately DO
+/// NOT test").
+#[test]
+fn phase_2_list_folder_smoke_scanner_fixtures() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let scanner_dir = std::path::PathBuf::from(manifest_dir)
+        .join("..")
+        .join("..")
+        .join("tests")
+        .join("fixtures")
+        .join("scanner");
+
+    if !scanner_dir.exists() {
+        eprintln!("[phase_2_list_folder_smoke] scanner fixtures dir missing -- skipping.");
+        return;
+    }
+
+    let listing = pfp_photos::list_folder(&scanner_dir).expect("list_folder");
+    if listing.items.is_empty() {
+        eprintln!("[phase_2_list_folder_smoke] scanner fixtures dir empty -- skipping.");
+        return;
+    }
+
+    // D-10: scanner fixtures never have GPS.
+    for item in &listing.items {
+        assert!(
+            !item.has_gps,
+            "scanner fixture {} unexpectedly has GPS",
+            item.file_name
+        );
+        assert_eq!(item.id.len(), 32, "id length");
+    }
+
+    // Per-item read_detail also yields gps == None.
+    let first = &listing.items[0];
+    let detail = pfp_exif::read_detail(&first.absolute_path).expect("read_detail");
+    assert!(
+        detail.gps.is_none(),
+        "detail.gps must be None for scanner fixtures"
+    );
+}
