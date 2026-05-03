@@ -80,6 +80,44 @@ fn is_not_writable(e: &std::io::Error) -> bool {
         .contains("read-only file system")
 }
 
+/// Probe whether the cache directory *would* be writable, WITHOUT
+/// actually creating `.pfp-thumbs/`. WR-04: `ensure_cache_dir` materializes
+/// `.pfp-thumbs/` in the user's folder on every successful `list_folder`,
+/// even if the user never selects a photo. On a Lightroom / iCloud Drive
+/// / Dropbox-watched folder this pollutes the working folder for zero
+/// benefit. Instead, attempt to create + immediately delete a sentinel
+/// dotfile in the parent folder; treat success as "we could create the
+/// cache dir if asked to," failure as the D-18 banner trigger.
+///
+/// The first real `write_atomic` call still calls `ensure_cache_dir` and
+/// creates the directory then -- so the cache dir appears only when
+/// thumbnails are actually requested.
+pub fn probe_cache_writable(folder: &Path) -> bool {
+    // Pick a per-process unique probe name to avoid collisions if two
+    // app instances probe the same folder concurrently.
+    let probe_name = format!(
+        ".pfp-write-probe-{}-{}",
+        std::process::id(),
+        // Cheap monotonic-ish suffix; doesn't need cryptographic uniqueness.
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let probe = folder.join(probe_name);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Atomic write: sibling tempfile in the cache dir, sync_all, persist, parent fsync.
 pub fn write_atomic(folder: &Path, key: &str, bytes: &[u8]) -> Result<(), PhotosError> {
     ensure_cache_dir(folder)?;

@@ -16,7 +16,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
-use crate::cache::{cache_key, ensure_cache_dir};
+use crate::cache::{cache_key, probe_cache_writable};
 use crate::error::PhotosError;
 use crate::jpeg::{has_jpeg_extension, is_real_jpeg};
 
@@ -174,9 +174,12 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
     items.sort_by(|a, b| a.file_name.cmp(&b.file_name));
     footer.total_jpegs = items.len();
 
-    // D-18: probe cache writability. Loud false on PermissionDenied / ReadOnlyFilesystem;
-    // any other Io error (rare) is treated as not-writable too.
-    let thumb_cache_writable = ensure_cache_dir(folder).is_ok();
+    // D-18 / WR-04: probe cache writability WITHOUT materializing
+    // `.pfp-thumbs/`. The cache dir is created lazily by the first
+    // `write_atomic` call when thumbnails are actually requested -- so a
+    // listed-but-never-selected folder no longer gets a stray dotfile
+    // directory that Lightroom / iCloud Drive / Dropbox would sync.
+    let thumb_cache_writable = probe_cache_writable(folder);
 
     Ok(FolderListing {
         folder_path: folder.to_string_lossy().into_owned(),
