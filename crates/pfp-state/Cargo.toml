@@ -7,4 +7,11 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Reserved for Phase 4 — no deps yet.
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }   # used by save() for atomic sibling tempfile
+
+[dev-dependencies]
+tempfile = { workspace = true }
