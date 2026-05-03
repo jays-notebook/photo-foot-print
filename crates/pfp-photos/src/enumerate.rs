@@ -112,12 +112,22 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
             continue;
         }
         let size_bytes = meta.len();
-        let mtime_unix = meta
+        // WR-01: cache_key collision floor at 0 is unsafe. The cache_key
+        // contract requires uniqueness across (file_name, mtime, size); two
+        // files whose mtime read fails (rare on macOS, possible on FUSE
+        // mounts) or whose mtime predates UNIX_EPOCH would otherwise
+        // collapse to the same key. Refuse to enumerate the file instead.
+        let mtime_unix = match meta
             .modified()
             .ok()
             .and_then(|st| st.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+        {
+            Some(d) => d.as_secs() as i64,
+            None => {
+                footer.read_failed += 1;
+                continue;
+            }
+        };
 
         // Step 6: read EXIF summary (strict-4 GPS + validated DTO).
         // BL-02: a JPEG with no APP1/EXIF segment at all is a valid scanner
