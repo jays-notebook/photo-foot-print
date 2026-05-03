@@ -2292,10 +2292,12 @@ dependencies = [
 name = "photo-foot-print"
 version = "0.1.0"
 dependencies = [
+ "pfp-exif",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
