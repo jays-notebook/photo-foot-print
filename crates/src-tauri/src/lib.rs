@@ -4,9 +4,15 @@
 //! D-08 invariant: Tauri-only code lives here. The four pfp-* lib crates carry
 //! zero `tauri::*` symbols.
 
+// Plan 02-04: app_state and protocols submodules are populated across Tasks 1-3.
+// Task 2 ships the wire DTOs in commands/{folder,state}.rs but the Builder
+// chain only references the new commands once Task 3 wires the full chain
+// (preserving clippy's dead-code analysis as a real signal in the meantime).
+#[allow(dead_code)]
 mod app_state;
 mod commands;
 mod error;
+#[allow(dead_code)]
 mod protocols;
 
 pub fn run() {

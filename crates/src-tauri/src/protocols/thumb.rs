@@ -6,7 +6,7 @@ pub fn handle<R: tauri::Runtime>(
     responder: tauri::UriSchemeResponder,
 ) {
     // No-op stub. Real implementation lands in Plan 04 Task 3.
-    let _ = responder.respond(
+    responder.respond(
         http::Response::builder()
             .status(404)
             .body(Vec::new())
