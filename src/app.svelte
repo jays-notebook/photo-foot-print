@@ -16,12 +16,12 @@
   import type { UnlistenFn } from "@tauri-apps/api/event";
 
   // ----- Reactive state -----
-  let listing: FolderListing | null = $state(null);
+  let listing = $state<FolderListing | null>(null);
   let loading = $state(false);
-  let bootstrapError: string | null = $state(null);
-  let selectedId: string | null = $state(null);
+  let bootstrapError = $state<string | null>(null);
+  let selectedId = $state<string | null>(null);
   // EmptyState message — null = first launch, string = "previous folder not found: {path}"
-  let emptyStateNote: string | null = $state(null);
+  let emptyStateNote = $state<string | null>(null);
   // Banner dismissal lasts for the session. Reset on every successful load
   // where thumb_cache_writable is false again (per UI-SPEC).
   let bannerDismissed = $state(false);
@@ -73,8 +73,8 @@
   }
 
   // ----- Selection sync -----
-  let selectedSummary: PhotoSummary | null = $derived(
-    listing?.items.find((i) => i.id === selectedId) ?? null,
+  let selectedSummary = $derived<PhotoSummary | null>(
+    listing?.items.find((i: PhotoSummary) => i.id === selectedId) ?? null,
   );
 
   // ----- Banner visibility -----
@@ -87,7 +87,9 @@
   folderPath={listing?.folder_path ?? null}
   {loading}
   onOpen={loadFolder}
-  onRefresh={() => listing && loadFolder(listing.folder_path)}
+  onRefresh={() => {
+    if (listing) void loadFolder(listing.folder_path);
+  }}
 />
 
 <div class="list-pane">
