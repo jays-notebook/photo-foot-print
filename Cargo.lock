@@ -2188,6 +2188,13 @@ version = "0.1.0"
 [[package]]
 name = "pfp-state"
 version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "pfp-tiles"
