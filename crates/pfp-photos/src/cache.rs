@@ -94,9 +94,25 @@ pub fn write_atomic(folder: &Path, key: &str, bytes: &[u8]) -> Result<(), Photos
     tmp.as_file().sync_all()?;
     tmp.persist(&target).map_err(|e| PhotosError::Io(e.error))?;
 
-    // Best-effort parent fsync. Failure here doesn't invalidate the write.
-    if let Ok(dir_fd) = OpenOptions::new().read(true).open(&dir) {
-        let _ = dir_fd.sync_all();
+    // Best-effort parent fsync. Failure here doesn't invalidate the
+    // write itself (the rename succeeded), but it does mean the rename
+    // is not yet durable across a power loss. For thumbnails -- which
+    // are regenerable -- we accept that loss; we just refuse to swallow
+    // it silently. WR-03: log so disk-full / quota-exceeded surfaces
+    // at least in dev runs instead of disappearing.
+    match OpenOptions::new().read(true).open(&dir) {
+        Ok(dir_fd) => {
+            if let Err(e) = dir_fd.sync_all() {
+                eprintln!(
+                    "[cache::write_atomic] parent fsync failed for {dir:?}: {e}"
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[cache::write_atomic] cannot open parent {dir:?} for fsync: {e}"
+            );
+        }
     }
     Ok(())
 }
