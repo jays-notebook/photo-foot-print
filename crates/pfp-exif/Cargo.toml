@@ -7,12 +7,17 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Plan 02 fills in: little_exif, kamadak-exif, thiserror, anyhow.
-# Plan 03 adds: tempfile, plus libc on macOS.
+little_exif = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+
+# Plan 03 will add: tempfile here, plus libc on macOS via [target.'cfg(target_os = "macos")'.dependencies].
 
 [features]
 default = []
-# Plan 03 adds: fault-injection = []  (NOT a default feature — used only by tests).
+# Plan 03 adds: fault-injection = []  (NOT a default feature).
 
 [dev-dependencies]
-# Plan 02 adds: tempfile, kamadak-exif (for cross-check).
+kamadak-exif = { workspace = true }   # cross-check reader for round_trip integration test
+tempfile = { workspace = true }       # round_trip + makernote_diff create temp working JPEGs
