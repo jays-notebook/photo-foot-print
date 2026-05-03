@@ -81,16 +81,18 @@ fn find_marker(bytes: &[u8], marker: u8) -> Option<usize> {
 fn run_for_vendor(vendor: &str) {
     let path = fixtures_root().join(vendor).join("sample.jpg");
     if !path.exists() || std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) <= 1024 {
-        // Either the user has not yet supplied a real fixture (per docs/FIXTURES.md)
-        // or `git lfs pull` has not run. The test no-ops with a clear message --
-        // the #[ignore] gate keeps `cargo test` green by default; if someone runs
-        // `--ignored` on a fresh clone, they get an actionable message instead of
-        // a panic.
-        eprintln!(
-            "[{vendor}] fixture missing or LFS pointer at {:?} -- see docs/FIXTURES.md",
+        // The default `cargo test` path skips this via #[ignore] and never reaches here.
+        // Reaching here means the caller passed `--include-ignored` (or `--ignored`) -- i.e.
+        // they explicitly asked the gate to run. Silently no-op'ing in that case produces a
+        // false-green make test-gate output. Fail loudly so the gate's pass/fail signal is
+        // honest.
+        panic!(
+            "[{vendor}] fixture missing or LFS pointer at {:?}. \
+             Phase 1 gate requires a real OOC DSLR JPEG (see docs/FIXTURES.md). \
+             If you didn't intend to run the gate, omit --include-ignored / --ignored or \
+             run plain `cargo test`.",
             path,
         );
-        return;
     }
 
     let tmp = tempfile::tempdir().unwrap();
@@ -165,12 +167,14 @@ fn makernote_preserved_nikon() {
 #[test]
 #[ignore = "fixture-gated; companion to makernote_preserved_*; see docs/FIXTURES.md"]
 fn little_exif_issue_93_no_op_round_trip() {
+    let mut vendors_checked = 0;
     for vendor in ["sony", "canon", "nikon"] {
         let path = fixtures_root().join(vendor).join("sample.jpg");
         if !path.exists() || std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) <= 1024 {
-            eprintln!("[{vendor}] fixture missing -- skipping issue-93 pre-test");
+            eprintln!("[{vendor}] fixture missing -- skipping issue-93 pre-test for this vendor");
             continue;
         }
+        vendors_checked += 1;
         let tmp = tempfile::tempdir().unwrap();
         let work = tmp.path().join("photo.jpg");
         std::fs::copy(&path, &work).unwrap();
@@ -183,4 +187,10 @@ fn little_exif_issue_93_no_op_round_trip() {
             .write_to_file(&work)
             .unwrap_or_else(|e| panic!("[{vendor}] little_exif write failed (issue #93?): {e}"));
     }
+    assert!(
+        vendors_checked > 0,
+        "issue-93 pre-test ran zero vendors -- supply at least one OOC DSLR JPEG at \
+         tests/fixtures/{{sony,canon,nikon}}/sample.jpg (see docs/FIXTURES.md). \
+         If you didn't intend to run the gate, omit --include-ignored / --ignored.",
+    );
 }
