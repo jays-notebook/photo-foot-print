@@ -2174,6 +2174,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "kamadak-exif",
+ "libc",
  "little_exif",
  "serde",
  "tempfile",
