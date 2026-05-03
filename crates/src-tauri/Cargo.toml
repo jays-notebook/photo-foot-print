@@ -22,8 +22,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-# Plan 04 will add:
-#   pfp-exif = { path = "../pfp-exif" }
-# Adding it now would force this crate to compile against an empty pfp-exif (fine),
-# but Plan 04 also wires the IPC commands so we keep this dep declaration there for
-# locality.
+# Phase 1 lib crate dep -- only pfp-exif is implemented this phase. Phase 2
+# will add `pfp-photos = { path = "../pfp-photos" }` and so on.
+pfp-exif = { path = "../pfp-exif" }
+
+[dev-dependencies]
+# For the headless ipc_smoke integration test.
+tempfile = { workspace = true }
