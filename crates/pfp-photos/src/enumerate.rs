@@ -81,6 +81,25 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
             }
         };
 
+        // WR-02: probe file_type up front so sub-directories (e.g.
+        // `originals/`, `printed/`) are silently ignored rather than
+        // inflating `non_image_hidden`. The footer counts only items the
+        // user would expect to see in a flat-folder JPEG listing; a
+        // sub-directory is neither hidden nor a non-image *file*.
+        let file_type = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => {
+                footer.read_failed += 1;
+                continue;
+            }
+        };
+        if !file_type.is_file() {
+            // Directories, symlinks-to-non-files, sockets, FIFOs, etc.
+            // are not interesting and not user-visible mistakes. Drop
+            // silently without bumping any footer counter.
+            continue;
+        }
+
         // Step 2: skip dotfiles (defense-in-depth -- covers .pfp-thumbs/, .DS_Store, etc.)
         if file_name.starts_with('.') {
             footer.non_image_hidden += 1;
@@ -100,6 +119,8 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
         }
 
         // Step 5: size + mtime via fs::metadata.
+        // (file_type::is_file already vetted that this is a regular file;
+        // we still need the metadata for size + mtime.)
         let meta = match std::fs::metadata(&path) {
             Ok(m) => m,
             Err(_) => {
@@ -107,10 +128,6 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
                 continue;
             }
         };
-        if !meta.is_file() {
-            footer.non_image_hidden += 1;
-            continue;
-        }
         let size_bytes = meta.len();
         // WR-01: cache_key collision floor at 0 is unsafe. The cache_key
         // contract requires uniqueness across (file_name, mtime, size); two

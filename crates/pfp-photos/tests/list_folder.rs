@@ -61,15 +61,22 @@ fn mixed_content_folder_filters_and_counts_correctly() {
     // 1 hidden .DS_Store (dotfile)
     std::fs::write(folder.join(".DS_Store"), b"junk").unwrap();
 
-    // 1 nested .pfp-thumbs/ subdirectory (should be skipped by dotfile rule)
+    // 1 nested .pfp-thumbs/ subdirectory (silently ignored under WR-02:
+    // sub-directories are dropped before counting, regardless of name).
     std::fs::create_dir(folder.join(".pfp-thumbs")).unwrap();
+
+    // 1 nested non-dot subdirectory (e.g. `originals/`). Pre-WR-02 this
+    // inflated `non_image_hidden`; post-WR-02 it is silently ignored
+    // because sub-directories are not part of the flat-folder JPEG count.
+    std::fs::create_dir(folder.join("originals")).unwrap();
 
     let listing = list_folder(folder).expect("list_folder");
 
     assert_eq!(listing.items.len(), 3, "expected exactly 3 valid JPEGs");
     assert_eq!(listing.footer.total_jpegs, 3);
-    // Hidden: .DS_Store (dotfile) + .pfp-thumbs (dotfile) + graphic.png (wrong ext) + broken.jpg (wrong magic) = 4
-    assert_eq!(listing.footer.non_image_hidden, 4, "hidden count");
+    // Hidden (post-WR-02 -- directories are NOT counted):
+    //   .DS_Store (dotfile) + graphic.png (wrong ext) + broken.jpg (wrong magic) = 3
+    assert_eq!(listing.footer.non_image_hidden, 3, "hidden count");
     assert_eq!(listing.footer.read_failed, 0, "no IO failures expected");
 
     // Sorted ASC by file_name.
