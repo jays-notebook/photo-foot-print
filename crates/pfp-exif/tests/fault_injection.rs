@@ -18,8 +18,21 @@
 #![cfg(feature = "fault-injection")]
 
 use std::sync::atomic::Ordering;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use pfp_exif::atomic::fault_inject::PANIC_AFTER_TEMP_WRITE;
+
+/// Process-global mutex serializing every test that touches the
+/// `PANIC_AFTER_TEMP_WRITE` static. cargo test runs integration tests in
+/// parallel by default, so without this mutex one test's "armed" state can leak
+/// into another test's window between arm-and-call. This is the explicit
+/// mitigation for threat T-03-06 in the plan's threat model.
+fn fault_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Returns the first available real DSLR fixture, or None if no fixture has been
 /// supplied yet. We need a real JPEG so `little_exif::Metadata::new_from_path` succeeds.
@@ -46,6 +59,7 @@ fn reset_fault_flag() {
 #[test]
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn original_survives_panic_after_temp_write() {
+    let _guard = fault_lock();
     let Some(src) = first_available_fixture() else {
         eprintln!("No fixture supplied -- see docs/FIXTURES.md. Skipping fault-injection test.");
         return;
@@ -88,6 +102,7 @@ fn original_survives_panic_after_temp_write() {
 #[test]
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn original_survives_writer_callback_error() {
+    let _guard = fault_lock();
     let Some(src) = first_available_fixture() else {
         return;
     };
@@ -118,6 +133,7 @@ fn original_survives_writer_callback_error() {
 #[test]
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn happy_path_succeeds_with_durable_write() {
+    let _guard = fault_lock();
     let Some(src) = first_available_fixture() else {
         return;
     };
@@ -179,6 +195,7 @@ fn make_pristine_bytes() -> Vec<u8> {
 /// This is the load-bearing assertion for EXIF-07 / Phase 1 success criterion #4.
 #[test]
 fn write_via_temp_panic_at_fault_point_preserves_original() {
+    let _guard = fault_lock();
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("photo.jpg");
     let pristine = make_pristine_bytes();
@@ -217,6 +234,7 @@ fn write_via_temp_panic_at_fault_point_preserves_original() {
 /// contains the new bytes, and no `.pfp-tmp-*` siblings remain in the parent dir.
 #[test]
 fn write_via_temp_happy_path_replaces_target_and_cleans_up() {
+    let _guard = fault_lock();
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("photo.jpg");
     let pristine = make_pristine_bytes();
@@ -262,6 +280,7 @@ fn write_via_temp_happy_path_replaces_target_and_cleans_up() {
 /// byte-identical and clean up the temp file.
 #[test]
 fn write_via_temp_writer_error_leaves_original_byte_identical() {
+    let _guard = fault_lock();
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("photo.jpg");
     let pristine = make_pristine_bytes();
