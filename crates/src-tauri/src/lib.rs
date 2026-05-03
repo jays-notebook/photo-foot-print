@@ -1,29 +1,29 @@
-//! Tauri host entry. The Builder chain registers Phase 1's two IPC commands
-//! (read_exif_summary, list_fixtures). Phase 2/3/4 add to the handler list.
+//! Tauri host entry. Builder chain registers Phase 1 commands + Phase 2's
+//! folder/photo/state IPC + the pfp-thumb:// async URI scheme.
 //!
-//! D-08 invariant: Tauri-only code lives here. The four pfp-* lib crates carry
-//! zero `tauri::*` symbols.
+//! D-08 invariant: Tauri-only code lives here, in `commands/`, and `protocols/`.
+//! The four pfp-* lib crates carry zero `tauri::*` symbols.
 
-// Plan 02-04: app_state and protocols submodules are populated across Tasks 1-3.
-// Task 2 ships the wire DTOs in commands/{folder,state}.rs but the Builder
-// chain only references the new commands once Task 3 wires the full chain
-// (preserving clippy's dead-code analysis as a real signal in the meantime).
-#[allow(dead_code)]
 mod app_state;
 mod commands;
 mod error;
-#[allow(dead_code)]
 mod protocols;
 
 pub fn run() {
     tauri::Builder::default()
-        // Phase 2/3 will add:
-        //   .register_asynchronous_uri_scheme_protocol("pfp-thumb", ...)
-        //   .register_asynchronous_uri_scheme_protocol("pfp-tile", ...)
-        // Hook point preserved here as a comment to make the extension obvious.
+        .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol("pfp-thumb", protocols::thumb::handle)
+        .manage(app_state::TauriAppState::default())
         .invoke_handler(tauri::generate_handler![
+            // Phase 1 commands (kept — ipc_smoke depends on them).
             commands::exif::read_exif_summary,
             commands::exif::list_fixtures,
+            // Phase 2 commands.
+            commands::folder::open_folder_dialog,
+            commands::folder::list_folder,
+            commands::folder::read_photo_meta,
+            commands::thumbnail::request_thumbnail,
+            commands::state::get_app_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

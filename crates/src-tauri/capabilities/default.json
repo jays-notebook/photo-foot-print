@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Phase 1 default capability. Asset protocol + core defaults only. No fs:*, no dialog:*.",
+  "description": "Phase 2 default capability. Asset protocol + core defaults only. No fs:*, no dialog:* (dialog is proxied via commands::folder::open_folder_dialog from Rust).",
   "windows": ["main"],
   "permissions": ["core:default"]
 }

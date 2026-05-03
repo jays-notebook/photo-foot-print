@@ -19,8 +19,11 @@
 //!     make test-gate
 //!
 //! REQUIRES on PATH:
+//!
 //!   - exiftool        (`brew install exiftool`)
+//!
 //! REQUIRES on disk (per docs/FIXTURES.md):
+//!
 //!   - tests/fixtures/scanner/*.jpg  (at least one representative file)
 
 use std::path::{Path, PathBuf};
