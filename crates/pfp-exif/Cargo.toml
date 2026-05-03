@@ -11,12 +11,17 @@ little_exif = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+tempfile = { workspace = true }   # Plan 03: sibling NamedTempFile in atomic::write_via_temp
 
-# Plan 03 will add: tempfile here, plus libc on macOS via [target.'cfg(target_os = "macos")'.dependencies].
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }       # Plan 03: libc::fcntl(F_FULLFSYNC) on macOS
 
 [features]
 default = []
-# Plan 03 adds: fault-injection = []  (NOT a default feature).
+# Cross-crate-reachable fault-injection hook for the durability integration test.
+# NEVER ship as a default feature -- production builds must not include the panic point.
+# Enabled explicitly by `cargo test --features fault-injection` (Makefile target test-fault).
+fault-injection = []
 
 [dev-dependencies]
 kamadak-exif = { workspace = true }   # cross-check reader for round_trip integration test
