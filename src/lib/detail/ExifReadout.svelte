@@ -11,8 +11,13 @@
   let altText = $derived(
     meta.altitude_m !== null ? `${meta.altitude_m.toFixed(1)} m` : null,
   );
+  // WR-07: formatCaptureTime returns null for malformed input. Collapse
+  // both the absent case (null on the wire) and the malformed case (null
+  // from the formatter) to the muted "—" placeholder.
   let captureText = $derived(
-    meta.capture_time ? formatCaptureTime(meta.capture_time) : "—",
+    meta.capture_time
+      ? (formatCaptureTime(meta.capture_time) ?? "—")
+      : "—",
   );
 </script>
 

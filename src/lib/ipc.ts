@@ -159,10 +159,17 @@ export function formatLatLng(value: number): string {
 }
 
 /** Display capture time: convert "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DD HH:MM:SS"
- *  (UI-SPEC: dashes for readability; on-disk format unchanged). */
-export function formatCaptureTime(s: string): string {
-  // Replace ONLY the date portion's colons. The DTO format guarantees the
-  // date is the first 10 chars (e.g. "2026:05:03").
-  if (s.length < 10 || s[4] !== ":" || s[7] !== ":") return s;
+ *  (UI-SPEC: dashes for readability; on-disk format unchanged).
+ *
+ *  WR-07: returns `null` when the input does NOT match the expected
+ *  19-char DTO shape, so the caller can render the muted "—" placeholder
+ *  instead of a verbatim malformed string. The Rust-side
+ *  `validate_dto_format` already filters bad inputs before they reach
+ *  the wire, so reaching the null branch implies a contract violation
+ *  -- still safer to render a placeholder than to mislead the user with
+ *  a raw "not a date" string. */
+export function formatCaptureTime(s: string): string | null {
+  if (s.length < 19) return null;
+  if (s[4] !== ":" || s[7] !== ":" || s[10] !== " ") return null;
   return `${s.slice(0, 4)}-${s.slice(5, 7)}-${s.slice(8, 10)}${s.slice(10)}`;
 }
