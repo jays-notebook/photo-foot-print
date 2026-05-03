@@ -41,20 +41,43 @@ pub fn cache_file(folder: &Path, key: &str) -> PathBuf {
 /// Probe whether the cache directory can be created. Returns Ok(()) on success
 /// (or if it already exists), `Err(PhotosError::CacheNotWritable)` on permission
 /// error or read-only filesystem (D-18 banner trigger).
+///
+/// We classify the read-only filesystem case via two channels because
+/// `std::io::ErrorKind::ReadOnlyFilesystem` is gated on Rust 1.83+ and the
+/// workspace MSRV is 1.77.2 (matched to Tauri 2.x):
+///   1. `raw_os_error() == Some(EROFS)` (30 on Linux/macOS, 6276 on Windows)
+///      -- the platform error code, the most reliable signal.
+///   2. Substring match `"read-only file system"` in the error display --
+///      a fallback for the (rare) case where the raw OS code is not
+///      surfaced or differs across libc variants.
 pub fn ensure_cache_dir(folder: &Path) -> Result<(), PhotosError> {
     let dir = cache_dir(folder);
     match std::fs::create_dir_all(&dir) {
         Ok(()) => Ok(()),
-        Err(e)
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
-            ) =>
-        {
+        Err(e) if is_not_writable(&e) => {
             Err(PhotosError::CacheNotWritable(folder.to_path_buf()))
         }
         Err(e) => Err(PhotosError::Io(e)),
     }
+}
+
+/// True iff the io::Error indicates the destination is not writable due to
+/// permissions or a read-only filesystem. See `ensure_cache_dir` for why
+/// this is implemented as a function rather than a `matches!` over
+/// `ErrorKind` variants.
+fn is_not_writable(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    // EROFS: Linux/macOS = 30. (Windows returns ERROR_WRITE_PROTECT = 19,
+    // mapped by Rust to ErrorKind::PermissionDenied in practice; treat the
+    // string match as the catch-all there.)
+    if cfg!(unix) && e.raw_os_error() == Some(30) {
+        return true;
+    }
+    e.to_string()
+        .to_ascii_lowercase()
+        .contains("read-only file system")
 }
 
 /// Atomic write: sibling tempfile in the cache dir, sync_all, persist, parent fsync.
