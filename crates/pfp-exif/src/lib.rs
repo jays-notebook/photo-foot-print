@@ -28,7 +28,9 @@ mod time;
 
 pub use crate::detail::{read_detail, PhotoDetail};
 pub use crate::error::ExifError;
-pub use crate::summary::{gps_signed_decimal, is_gps_valid, read_summary, ExifSummary};
+pub use crate::summary::{
+    gps_signed_decimal, is_gps_valid, read_summary, read_summary_or_default, ExifSummary,
+};
 
 use std::path::Path;
 

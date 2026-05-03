@@ -100,6 +100,91 @@ fn empty_folder_returns_zero_items() {
     assert!(listing.thumb_cache_writable);
 }
 
+/// Strip the EXIF APP1 segment from a JPEG byte stream (`Exif\0\0` payload
+/// prefix). Returns a fresh `Vec<u8>` -- the input is not mutated.
+///
+/// The matching logic mirrors `little_exif/src/jpg.rs::clear_segment`:
+/// scan markers `FF E*`, read big-endian length, identify APP1 by the
+/// `Exif\0\0` payload prefix, splice that segment out.
+fn strip_exif_app1(bytes: &[u8]) -> Vec<u8> {
+    if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
+        // Not a JPEG; pass through.
+        return bytes.to_vec();
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    out.extend_from_slice(&bytes[..2]); // SOI
+    let mut i = 2;
+    while i + 3 < bytes.len() {
+        if bytes[i] != 0xFF {
+            // Hit the entropy-coded segment; copy the rest verbatim.
+            out.extend_from_slice(&bytes[i..]);
+            return out;
+        }
+        let marker = bytes[i + 1];
+        // SOS (0xDA) starts the compressed image data; copy from here to EOI.
+        if marker == 0xDA {
+            out.extend_from_slice(&bytes[i..]);
+            return out;
+        }
+        // Standalone markers without a length payload (none we care about
+        // appear before SOS in well-formed JPEGs from scanners).
+        let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+        let segment_end = i + 2 + len; // marker (2) + length-bytes-included-in-len
+        if segment_end > bytes.len() {
+            // Malformed; copy the rest verbatim.
+            out.extend_from_slice(&bytes[i..]);
+            return out;
+        }
+        // APP1 EXIF segment? Payload starts with "Exif\0\0".
+        if marker == 0xE1
+            && segment_end - i >= 10
+            && &bytes[i + 4..i + 10] == b"Exif\0\0"
+        {
+            // Skip this segment entirely.
+            i = segment_end;
+            continue;
+        }
+        out.extend_from_slice(&bytes[i..segment_end]);
+        i = segment_end;
+    }
+    if i < bytes.len() {
+        out.extend_from_slice(&bytes[i..]);
+    }
+    out
+}
+
+#[test]
+fn jpeg_without_exif_segment_appears_in_listing_with_no_gps() {
+    // BL-02 regression: a JPEG with no APP1/EXIF segment must NOT be
+    // dropped to footer.read_failed; it must appear in items with
+    // has_gps:false and capture_time:None.
+    let Some(src_jpeg) = first_available_jpeg() else {
+        eprintln!("[list_folder] No fixture JPEG -- skipping BL-02 regression.");
+        return;
+    };
+    let original = std::fs::read(&src_jpeg).unwrap();
+    let stripped = strip_exif_app1(&original);
+    // Sanity: stripping must not have produced an identical buffer (else
+    // the source already had no EXIF and the test is degenerate).
+    assert_ne!(
+        stripped.len(),
+        original.len(),
+        "fixture has no EXIF to strip -- pick a different fixture"
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path();
+    std::fs::write(folder.join("no-exif.jpg"), &stripped).unwrap();
+
+    let listing = list_folder(folder).expect("list_folder");
+    assert_eq!(listing.items.len(), 1, "exif-less JPEG must still be listed");
+    assert_eq!(listing.footer.read_failed, 0, "must not be in read_failed");
+    let item = &listing.items[0];
+    assert_eq!(item.file_name, "no-exif.jpg");
+    assert!(!item.has_gps, "no exif => no gps");
+    assert!(item.capture_time.is_none(), "no exif => no capture_time");
+}
+
 #[test]
 fn scanner_fixtures_have_no_gps() {
     // Per D-10: scanner-output JPEGs never have GPS. The list correctly

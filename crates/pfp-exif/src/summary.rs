@@ -33,6 +33,52 @@ pub fn read_summary(target: &Path) -> Result<ExifSummary, ExifError> {
     })
 }
 
+/// Like [`read_summary`] but treats "JPEG has no EXIF segment at all" as a
+/// valid empty summary instead of an error.
+///
+/// `little_exif::Metadata::new_from_path` returns an error on any JPEG that
+/// has no APP1/EXIF segment -- a routine state for some scanner output and
+/// for files passed through `jpegtran -copy none`. The folder-list pipeline
+/// (Phase 2 BL-02) wants those files to appear in the list with `has_gps:
+/// false` and `capture_time: None`, NOT to disappear into the
+/// `read_failed` count. Hard I/O / parse failures still propagate.
+pub fn read_summary_or_default(target: &Path) -> Result<ExifSummary, ExifError> {
+    match Metadata::new_from_path(target) {
+        Ok(metadata) => Ok(ExifSummary {
+            has_gps: is_gps_valid(&metadata),
+            capture_time: read_validated_dto(&metadata),
+        }),
+        Err(e) if is_no_exif_segment(&e) => Ok(ExifSummary {
+            has_gps: false,
+            capture_time: None,
+        }),
+        Err(e) => Err(ExifError::LittleExif(format!(
+            "read {}: {}",
+            target.display(),
+            e
+        ))),
+    }
+}
+
+/// Recognize little_exif error states that mean "this JPEG has no EXIF
+/// segment we can parse" (vs. a hard read failure). The upstream error
+/// type is `std::io::Error`; we pattern-match on the message because
+/// there is no typed variant.
+///
+/// Cases handled:
+///   - `"No EXIF data found!"` -- JPEG has no APP1 segment at all
+///     (e.g., scanner output, `jpegtran -copy none`).
+///   - `"Expected endian information, but found something that
+///     suspectedly is XMP data"` -- the first APP1 segment is XMP, not
+///     EXIF. `little_exif`'s reader returns whatever the first APP1
+///     segment is and rejects it at the endian check; for our purposes
+///     this is identical to "no EXIF" (the JPEG carries XMP-only
+///     metadata).
+fn is_no_exif_segment(e: &std::io::Error) -> bool {
+    let msg = e.to_string();
+    msg.contains("No EXIF data found") || msg.contains("suspectedly is XMP data")
+}
+
 /// Strict-4 validity predicate for the "has GPS" badge (D-21, FOLDER-03).
 ///
 /// Returns `Some((lat_signed, lng_signed))` when ALL of:

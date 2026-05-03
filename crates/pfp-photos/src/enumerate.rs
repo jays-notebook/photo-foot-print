@@ -120,7 +120,11 @@ pub fn list_folder(folder: &Path) -> Result<FolderListing, PhotosError> {
             .unwrap_or(0);
 
         // Step 6: read EXIF summary (strict-4 GPS + validated DTO).
-        let summary = match pfp_exif::read_summary(&path) {
+        // BL-02: a JPEG with no APP1/EXIF segment at all is a valid scanner
+        // output (or a `jpegtran -copy none` pass-through). Treat "EXIF absent"
+        // as `has_gps: false`, `capture_time: None` and KEEP the file in the
+        // listing. Only hard parse / I/O failures count as `read_failed`.
+        let summary = match pfp_exif::read_summary_or_default(&path) {
             Ok(s) => s,
             Err(_) => {
                 footer.read_failed += 1;
