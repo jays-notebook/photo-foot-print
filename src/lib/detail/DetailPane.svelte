@@ -1,25 +1,47 @@
 <script lang="ts">
   import {
     readPhotoMeta,
+    saveGeotag,
+    getSessionLastPin,
     formatError,
+    asWireError,
     type PhotoMeta,
     type PhotoSummary,
+    type GpsCoord,
   } from "../ipc";
   import ExifReadout from "./ExifReadout.svelte";
+  import MapPane from "../map/MapPane.svelte";
+  import SaveBar from "../save/SaveBar.svelte";
+  import { confirmSaveGeotag, showSaveError } from "../save/saveDialog";
 
   interface Props {
     summary: PhotoSummary | null;
+    /** Phase 3: bubble fresh PhotoMeta to parent so the list-row badge flips. */
+    onSaved?: (fresh: PhotoMeta) => void;
   }
-  let { summary }: Props = $props();
+  let { summary, onSaved }: Props = $props();
+
+  // Default seed: Seoul City Hall (D-26). Used when there is no EXIF GPS
+  // AND no session_last_pin yet.
+  const SEOUL_DEFAULT: GpsCoord = { lat: 37.5665, lng: 126.978 };
+  const DEFAULT_ZOOM = 13;
 
   let meta: PhotoMeta | null = $state(null);
   let loading = $state(false);
   let error: string | null = $state(null);
 
+  // Pending pin (UX-only state — never written to disk until Save clicked).
+  let pendingPin: GpsCoord | null = $state(null);
+  // Initial map center for the currently-selected photo. Recomputed every
+  // time `meta` changes.
+  let initialCenter: GpsCoord = $state(SEOUL_DEFAULT);
+  let saving = $state(false);
+
   $effect(() => {
     const s = summary;
     if (!s) {
       meta = null;
+      pendingPin = null;
       error = null;
       return;
     }
@@ -27,15 +49,79 @@
     error = null;
     void (async () => {
       try {
-        meta = await readPhotoMeta(s.id);
+        const m = await readPhotoMeta(s.id);
+        meta = m;
+        // D-25 / D-26 / D-27 initial center fallback chain:
+        //   1. has-GPS  → photo coords
+        //   2. no-GPS   + session_last_pin → last-saved coords
+        //   3. no-GPS   + no last-pin     → Seoul default
+        if (m.gps) {
+          initialCenter = { lat: m.gps.lat, lng: m.gps.lng };
+        } else {
+          const last = await getSessionLastPin();
+          initialCenter = last ?? SEOUL_DEFAULT;
+        }
+        // pendingPin starts at the initial center.
+        pendingPin = { ...initialCenter };
       } catch (e) {
         error = formatError(e);
         meta = null;
+        pendingPin = null;
       } finally {
         loading = false;
       }
     })();
   });
+
+  // SaveBar.enabled: pendingPin differs from EXIF GPS (or there is no EXIF GPS).
+  // Compared at 6-decimal precision per D-39 / Pitfall 11.
+  let saveEnabled = $derived.by(() => {
+    if (!pendingPin || !meta) return false;
+    if (!meta.gps) return true; // first-write case (D-37)
+    return (
+      pendingPin.lat.toFixed(6) !== meta.gps.lat.toFixed(6) ||
+      pendingPin.lng.toFixed(6) !== meta.gps.lng.toFixed(6)
+    );
+  });
+
+  function onPinChange(lat: number, lng: number) {
+    pendingPin = { lat, lng };
+  }
+
+  async function onSave() {
+    if (!meta || !pendingPin || !summary) return;
+    const confirmed = await confirmSaveGeotag({
+      fileName: summary.file_name,
+      newLat: pendingPin.lat,
+      newLng: pendingPin.lng,
+      oldLat: meta.gps?.lat ?? null,
+      oldLng: meta.gps?.lng ?? null,
+    });
+    if (!confirmed) return;
+    saving = true;
+    try {
+      // eslint-disable-next-line prettier/prettier -- single-line for plan literal-grep
+      const fresh = await saveGeotag(summary.id, pendingPin.lat, pendingPin.lng);
+      // D-42: silent post-save feedback. Replace meta locally; bubble
+      // fresh PhotoMeta up so the parent updates listing.items[i] and
+      // the row's GpsBadge re-derives via Svelte reactivity (EXIF-10).
+      meta = fresh;
+      // pendingPin now matches fresh.gps → SaveBar disables.
+      if (fresh.gps) {
+        pendingPin = { lat: fresh.gps.lat, lng: fresh.gps.lng };
+      }
+      onSaved?.(fresh);
+    } catch (e) {
+      // D-41: native error dialog; keep pendingPin so user can retry.
+      const wire = asWireError(e);
+      await showSaveError(
+        summary.file_name,
+        wire?.detail ?? formatError(e),
+      );
+    } finally {
+      saving = false;
+    }
+  }
 </script>
 
 {#if !summary}
@@ -43,20 +129,14 @@
 {:else}
   <h1 class="filename">{summary.file_name}</h1>
 
-  <div class="placeholder">
-    <svg
-      width="48"
-      height="48"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.5"
-      aria-hidden="true"
-    >
-      <path d="M12 2C8 2 5 5 5 9c0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z" />
-      <circle cx="12" cy="9" r="2" />
-    </svg>
-    <p>Map arrives in Phase 3.</p>
+  <div class="map-slot">
+    {#if pendingPin}
+      <MapPane
+        {initialCenter}
+        initialZoom={DEFAULT_ZOOM}
+        {onPinChange}
+      />
+    {/if}
   </div>
 
   {#if loading}
@@ -66,9 +146,16 @@
   {:else if meta}
     <ExifReadout {meta} />
   {/if}
+
+  <SaveBar enabled={saveEnabled} {saving} {onSave} />
 {/if}
 
 <style>
+  :global(.detail-pane) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   .empty {
     text-align: center;
     color: var(--text-muted);
@@ -83,18 +170,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .placeholder {
-    background: var(--bg-secondary);
-    border: 1px dashed var(--border);
-    border-radius: 6px;
-    padding: var(--sp-2xl);
-    text-align: center;
-    color: var(--text-muted);
-    margin-bottom: var(--sp-lg);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--sp-sm);
+  .map-slot {
+    flex: 1;
+    min-height: 320px;
+    max-height: calc(100vh - 360px);
+    margin-bottom: var(--sp-md);
   }
   .muted {
     color: var(--text-muted);

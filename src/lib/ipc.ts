@@ -68,7 +68,8 @@ export type WireError =
   | { kind: "exif"; detail: string }
   | { kind: "path_traversal"; detail: string }
   | { kind: "photos"; detail: string }
-  | { kind: "state"; detail: string };
+  | { kind: "state"; detail: string }
+  | { kind: "exif_write"; detail: string };
 
 export interface ThumbnailReadyPayload {
   id: string;
@@ -102,6 +103,25 @@ export async function readPhotoMeta(id: string): Promise<PhotoMeta> {
 
 export async function requestThumbnail(id: string): Promise<RequestThumbnailAck> {
   return await invoke<RequestThumbnailAck>("request_thumbnail", { id });
+}
+
+/** Phase 3: write GPS coords to the photo's EXIF. Returns the fresh PhotoMeta
+ *  re-read from the file after the atomic write completes. On any failure,
+ *  the original file is unchanged (Phase 1 D-07 atomic-write contract); the
+ *  error surfaces as WireError with kind === "exif_write". */
+export async function saveGeotag(
+  id: string,
+  lat: number,
+  lng: number,
+): Promise<PhotoMeta> {
+  return await invoke<PhotoMeta>("save_geotag", { id, lat, lng });
+}
+
+/** Phase 3: read the in-session last-saved pin (D-27/D-28). Returns null if
+ *  no save has happened yet this session. Phase 4 will replace this with a
+ *  cross-launch persisted version via pfp-state. */
+export async function getSessionLastPin(): Promise<GpsCoord | null> {
+  return await invoke<GpsCoord | null>("get_session_last_pin");
 }
 
 // ============================================================================

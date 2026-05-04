@@ -6,6 +6,7 @@
     onThumbnailReady,
     onThumbnailFailed,
     type FolderListing,
+    type PhotoMeta,
     type PhotoSummary,
     formatError,
   } from "./lib/ipc";
@@ -104,6 +105,25 @@
     listing?.items.find((i: PhotoSummary) => i.id === selectedId) ?? null,
   );
 
+  // ----- Phase 3: post-save list-row update (EXIF-10) -----
+  // DetailPane bubbles a fresh PhotoMeta up after a successful
+  // save_geotag IPC call. Replace the corresponding row's
+  // PhotoSummary in place so PhotoRow's `summary.has_gps`
+  // derivation flips MISSING GPS -> HAS GPS without a manual refresh.
+  function handleSavedPhoto(fresh: PhotoMeta) {
+    if (!listing) return;
+    const i = listing.items.findIndex((s) => s.id === fresh.id);
+    if (i === -1) return;
+    // Replace in place; Svelte 5 deep reactivity picks up the assignment.
+    // PhotoSummary.has_gps is server-derived; recompute by checking
+    // whether the freshly re-read EXIF surfaced GPS coordinates.
+    listing.items[i] = {
+      ...listing.items[i],
+      has_gps: fresh.gps !== null,
+      capture_time: fresh.capture_time,
+    };
+  }
+
   // ----- Banner visibility -----
   let showBanner = $derived(
     listing !== null && !listing.thumb_cache_writable && !bannerDismissed,
@@ -150,7 +170,7 @@
 </div>
 
 <div class="detail-pane">
-  <DetailPane summary={selectedSummary} />
+  <DetailPane summary={selectedSummary} onSaved={handleSavedPhoto} />
 </div>
 
 <style>
