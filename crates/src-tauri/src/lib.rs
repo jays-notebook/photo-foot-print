@@ -13,7 +13,25 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("pfp-thumb", protocols::thumb::handle)
-        .manage(app_state::TauriAppState::default())
+        // Phase 3: register pfp-tile:// — same shape as pfp-thumb://.
+        .register_asynchronous_uri_scheme_protocol("pfp-tile", protocols::tile::handle)
+        // Phase 3: replace `.manage(TauriAppState::default())` with a `.setup`
+        // hook that resolves app_cache_dir() and constructs TileCache once.
+        .setup(|app| {
+            use tauri::Manager;
+            // Resolve cache_root via app.path().app_cache_dir() (Phase 3 D-30).
+            let resolved = app.path().app_cache_dir().map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+            })?;
+            let cache_root = resolved.join("tiles");
+            let http = pfp_tiles::build_osm_client().map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+            })?;
+            let tiles = pfp_tiles::TileCache::new(cache_root, http);
+            let state = app_state::TauriAppState::with_tiles(tiles);
+            app.manage(state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Phase 1 commands (kept — ipc_smoke depends on them).
             commands::exif::read_exif_summary,
@@ -24,6 +42,9 @@ pub fn run() {
             commands::folder::read_photo_meta,
             commands::thumbnail::request_thumbnail,
             commands::state::get_app_state,
+            // Phase 3 commands.
+            commands::geotag::save_geotag,
+            commands::geotag::get_session_last_pin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -176,5 +197,32 @@ mod tests {
 
         let s = serde_json::to_string(&RequestThumbnailAck::Queued).unwrap();
         assert!(s.contains("\"status\":\"queued\""), "got: {s}");
+    }
+
+    /// Plan 03-03 Task 3 RED gate: pin the new WireError variant + serde shape.
+    #[test]
+    fn wire_error_exif_write_variant_serializes() {
+        let we = WireError::ExifWrite {
+            detail: "boom".to_string(),
+        };
+        let s = serde_json::to_string(&we).unwrap();
+        assert!(s.contains("\"kind\":\"exif_write\""), "got: {s}");
+        assert!(s.contains("\"detail\":\"boom\""), "got: {s}");
+    }
+
+    /// Plan 03-03 Task 3 RED gate: pin TauriAppState::with_tiles seeds the
+    /// new three Phase 3 fields correctly.
+    #[test]
+    fn tauri_app_state_with_tiles_seeds_phase3_fields() {
+        use crate::app_state::TauriAppState;
+        let tiles = pfp_tiles::TileCache::new(
+            std::env::temp_dir().join("pfp-with-tiles-test"),
+            pfp_tiles::build_osm_client().unwrap(),
+        );
+        let s = TauriAppState::with_tiles(tiles);
+        // session_last_pin starts as None.
+        assert!(s.session_last_pin.lock().unwrap().is_none());
+        // tile_fetch_semaphore has 4 permits per D-35.
+        assert_eq!(s.tile_fetch_semaphore.available_permits(), 4);
     }
 }

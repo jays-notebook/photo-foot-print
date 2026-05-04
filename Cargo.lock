@@ -3008,6 +3008,7 @@ dependencies = [
  "pfp-exif",
  "pfp-photos",
  "pfp-state",
+ "pfp-tiles",
  "serde",
  "serde_json",
  "sha2",
