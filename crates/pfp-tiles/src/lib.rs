@@ -27,14 +27,31 @@ pub use crate::error::TileError;
 pub use crate::fetch::{build_osm_client, fetch_upstream_url, FreshTile};
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use tokio::sync::Semaphore;
+
+/// OSMF policy compliance (D-35): cap on concurrent upstream OSM tile
+/// fetches. Applies to both the cache-miss synchronous fetch AND the
+/// stale-while-revalidate background spawn -- without this the spawned
+/// revalidation tasks fan out unbounded on a stale-cache pan (CR-02).
+const DEFAULT_UPSTREAM_PERMITS: usize = 4;
 
 /// Tile cache + upstream fetcher. One per app instance (held inside
 /// `TauriAppState`). Cheap to clone -- `reqwest::Client` is internally
-/// `Arc`-shared and `cache_root` is just a `PathBuf`.
+/// `Arc`-shared, `cache_root` is just a `PathBuf`, and the upstream
+/// semaphore is `Arc`-shared so all clones share one OSMF rate cap.
 #[derive(Clone)]
 pub struct TileCache {
     cache_root: PathBuf,
     http: reqwest::Client,
+    /// CR-02: every upstream OSM hit (cache-miss synchronous fetch AND
+    /// stale-while-revalidate background `tokio::spawn`) must acquire a
+    /// permit from this semaphore before calling `fetch::fetch_upstream`.
+    /// The previous implementation only capped the synchronous miss path
+    /// via a host-side semaphore in `protocols/tile.rs`; revalidation
+    /// fired outside the permit window, defeating D-35.
+    upstream_semaphore: Arc<Semaphore>,
 }
 
 /// Result returned by `get_tile`.
@@ -45,15 +62,43 @@ pub struct TileResponse {
 }
 
 impl TileCache {
-    /// Construct. `cache_root` MUST be the `app_cache_dir` resolved by
-    /// Tauri's `app.path().app_cache_dir()` joined with `"tiles"`; this crate
-    /// does not call `dirs::cache_dir()` directly so it stays testable with a
+    /// Construct with the default OSMF upstream cap (4 concurrent fetches).
+    /// `cache_root` MUST be the `app_cache_dir` resolved by Tauri's
+    /// `app.path().app_cache_dir()` joined with `"tiles"`; this crate does
+    /// not call `dirs::cache_dir()` directly so it stays testable with a
     /// tempdir.
     ///
     /// `http` MUST be built with the OSMF-compliant User-Agent -- see
     /// `build_osm_client` helper.
     pub fn new(cache_root: PathBuf, http: reqwest::Client) -> Self {
-        Self { cache_root, http }
+        Self::with_upstream_semaphore(
+            cache_root,
+            http,
+            Arc::new(Semaphore::new(DEFAULT_UPSTREAM_PERMITS)),
+        )
+    }
+
+    /// Construct with a caller-supplied upstream semaphore. Useful when the
+    /// host wants to share one `Arc<Semaphore>` between the URI-scheme
+    /// handler and the cache (e.g., to expose `available_permits()` for
+    /// observability). The semaphore is the OSMF rate cap (D-35); permit
+    /// count should be 4 unless you have a reason to deviate.
+    pub fn with_upstream_semaphore(
+        cache_root: PathBuf,
+        http: reqwest::Client,
+        upstream_semaphore: Arc<Semaphore>,
+    ) -> Self {
+        Self {
+            cache_root,
+            http,
+            upstream_semaphore,
+        }
+    }
+
+    /// Test-only handle for asserting the permit cap is wired correctly.
+    #[cfg(test)]
+    pub fn upstream_permits_available(&self) -> usize {
+        self.upstream_semaphore.available_permits()
     }
 
     /// Fetch a tile by `(z, x, y)`.
@@ -96,6 +141,12 @@ impl TileCache {
             let bytes = std::fs::read(&tile_path)?;
             if stale {
                 // Spawn revalidation. Do NOT await -- caller already has bytes.
+                // CR-02: acquire an OSMF upstream permit INSIDE the spawned
+                // task so this background fetch is bounded by the same 4-permit
+                // cap as the cache-miss path. Acquiring on the outer side and
+                // moving the permit in would also work; we acquire inside so
+                // the caller is unblocked the instant we have bytes (no wait
+                // for the semaphore on the synchronous path).
                 let this = self.clone();
                 let prev = meta_for_revalidate.clone();
                 tokio::spawn(async move {
@@ -110,7 +161,16 @@ impl TileCache {
         }
 
         // Cache miss branch -- synchronous upstream fetch.
+        // CR-02: acquire an OSMF upstream permit before hitting upstream so
+        // the cache-miss path is bounded by the same cap as revalidation.
+        let _permit = self
+            .upstream_semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| TileError::Init("upstream semaphore closed".to_string()))?;
         let fresh = crate::fetch::fetch_upstream(&self.http, z, x, y, None).await?;
+        drop(_permit);
         crate::cache::write_atomic(&tile_path, &meta_path, &fresh.bytes, &fresh.meta)?;
         Ok(TileResponse {
             bytes: fresh.bytes,
@@ -122,6 +182,11 @@ impl TileCache {
     /// Background revalidation. Errors are eaten -- the caller already has
     /// stale bytes; on transient failure we keep the cache as-is and try
     /// again on the next stale read.
+    ///
+    /// CR-02: acquires an OSMF upstream permit before calling
+    /// `fetch_upstream`. Without this, a single pan over a stale cache
+    /// could `tokio::spawn` dozens of concurrent OSM hits, defeating the
+    /// 4-permit D-35 rate cap.
     async fn revalidate(
         &self,
         z: u8,
@@ -131,6 +196,12 @@ impl TileCache {
     ) -> Result<(), TileError> {
         let tile_path = crate::cache::tile_path(&self.cache_root, z, x, y);
         let meta_path = crate::cache::meta_path(&self.cache_root, z, x, y);
+        let _permit = self
+            .upstream_semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| TileError::Init("upstream semaphore closed".to_string()))?;
         match crate::fetch::fetch_upstream(&self.http, z, x, y, prev.as_ref()).await {
             Ok(fresh) => {
                 crate::cache::write_atomic(&tile_path, &meta_path, &fresh.bytes, &fresh.meta)?;
