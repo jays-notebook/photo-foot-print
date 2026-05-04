@@ -41,15 +41,40 @@ pub enum SidecarReadError {
     Io(std::io::Error),
 }
 
-/// Read the sidecar JSON. Plan 02 implements the body.
-pub fn read(_path: &Path) -> Result<TileMeta, SidecarReadError> {
-    unimplemented!("Plan 02 implements sidecar::read")
+/// Read the sidecar JSON. Distinguishes Absent / Parse / Io so callers can
+/// branch (Pitfall 6: Parse is treated as stale-revalidate, NOT as miss).
+pub fn read(path: &Path) -> Result<TileMeta, SidecarReadError> {
+    if !path.exists() {
+        return Err(SidecarReadError::Absent);
+    }
+    let bytes = std::fs::read(path).map_err(SidecarReadError::Io)?;
+    serde_json::from_slice(&bytes).map_err(|e| SidecarReadError::Parse(e.to_string()))
 }
 
 /// Atomically write the sidecar JSON via sibling tempfile + persist.
-/// Plan 02 implements the body.
-pub fn write_atomic(_path: &Path, _meta: &TileMeta) -> Result<(), TileError> {
-    unimplemented!("Plan 02 implements sidecar::write_atomic")
+/// The caller (`cache::write_atomic`) is responsible for ensuring the parent
+/// dir exists before this is invoked, but we defensively `create_dir_all`
+/// here too so standalone sidecar writes remain self-contained (covers the
+/// round-trip test path that bypasses `cache::write_atomic`).
+pub fn write_atomic(path: &Path, meta: &TileMeta) -> Result<(), TileError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| TileError::Sidecar("sidecar path has no parent".to_string()))?;
+    std::fs::create_dir_all(parent)?;
+
+    let tmp = tempfile::Builder::new()
+        .prefix(".tile-meta-")
+        .suffix(".json.tmp")
+        .tempfile_in(parent)?;
+    {
+        use std::io::Write;
+        let mut w = std::io::BufWriter::new(tmp.as_file());
+        serde_json::to_writer(&mut w, meta).map_err(|e| TileError::Sidecar(e.to_string()))?;
+        w.flush()?;
+    }
+    tmp.as_file().sync_all()?;
+    tmp.persist(path).map_err(|e| TileError::Io(e.error))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -79,5 +104,42 @@ mod tests {
         assert_eq!(m.fetched_at_unix, 1);
         assert!(m.etag.is_none());
         assert!(m.last_modified.is_none());
+    }
+
+    #[test]
+    fn read_missing_sidecar_returns_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nope.meta.json");
+        match read(&path) {
+            Err(SidecarReadError::Absent) => {}
+            other => panic!("expected Absent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_corrupt_sidecar_returns_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.meta.json");
+        std::fs::write(&path, b"not json {{{").unwrap();
+        match read(&path) {
+            Err(SidecarReadError::Parse(_)) => {}
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_atomic_then_read_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rt.meta.json");
+        let m = TileMeta {
+            schema_version: 1,
+            max_age_secs: 604_800,
+            fetched_at_unix: 1_700_000_000,
+            etag: Some("\"abc\"".to_string()),
+            last_modified: Some("Wed, 21 Oct 2025 07:28:00 GMT".to_string()),
+        };
+        write_atomic(&path, &m).unwrap();
+        let m2 = read(&path).unwrap();
+        assert_eq!(m, m2);
     }
 }

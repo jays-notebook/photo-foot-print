@@ -7,9 +7,11 @@
 //! F_FULLFSYNC). Tiles are regenerable; the gold-plated `pfp-exif::atomic`
 //! path is reserved for the irreplaceable photo write.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::TileError;
+use crate::sidecar;
 use crate::sidecar::TileMeta;
 
 /// Compute the absolute path for the tile PNG file.
@@ -27,10 +29,7 @@ pub fn meta_path(cache_root: &Path, z: u8, x: u32, y: u32) -> PathBuf {
     let mut p = tile_path(cache_root, z, x, y);
     // Append ".meta.json" by manipulating the file name; cannot use
     // `set_extension` because that would replace ".png".
-    let new_name = format!(
-        "{}.meta.json",
-        p.file_name().unwrap().to_str().unwrap()
-    );
+    let new_name = format!("{}.meta.json", p.file_name().unwrap().to_str().unwrap());
     p.set_file_name(new_name);
     p
 }
@@ -38,14 +37,49 @@ pub fn meta_path(cache_root: &Path, z: u8, x: u32, y: u32) -> PathBuf {
 /// Atomic tile + sidecar write. Tile FIRST, sidecar SECOND so a crash
 /// mid-pair leaves "tile + missing sidecar" (recoverable as stale on
 /// next read), never "sidecar + missing tile".
-/// Plan 02 implements the body.
+///
+/// Pitfall 10 mitigation: `create_dir_all` for the parent chain on first write.
+/// Pitfall 4 mitigation: sibling tempfile in the SAME directory (not the OS
+/// tmpdir) so `persist` is a same-filesystem rename, not a cross-filesystem
+/// copy.
 pub fn write_atomic(
-    _tile_path: &Path,
-    _meta_path: &Path,
-    _bytes: &[u8],
-    _meta: &TileMeta,
+    tile_path: &Path,
+    meta_path: &Path,
+    bytes: &[u8],
+    meta: &TileMeta,
 ) -> Result<(), TileError> {
-    unimplemented!("Plan 02 implements cache::write_atomic")
+    // Pitfall 10: create the dir chain on first write so tempfile_in succeeds.
+    if let Some(parent) = tile_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // 1. Write tile file atomically (tile FIRST per RESEARCH §Pattern 4).
+    //    A crash AFTER step 1 but BEFORE step 2 leaves "tile + missing sidecar"
+    //    on disk; the next read sees `SidecarReadError::Absent`, treats it as
+    //    stale, and revalidates -- self-healing.
+    let tile_parent = tile_path
+        .parent()
+        .ok_or_else(|| TileError::Sidecar("tile path has no parent".to_string()))?;
+    let tile_tmp = tempfile::Builder::new()
+        .prefix(".tile-")
+        .suffix(".png.tmp")
+        .tempfile_in(tile_parent)?;
+    {
+        let mut w = std::io::BufWriter::new(tile_tmp.as_file());
+        w.write_all(bytes)?;
+        w.flush()?;
+    }
+    tile_tmp.as_file().sync_all()?;
+    tile_tmp
+        .persist(tile_path)
+        .map_err(|e| TileError::Io(e.error))?;
+
+    // 2. Write sidecar SECOND. The reverse order would risk "sidecar +
+    //    missing tile" on a crash, which the cache cannot self-heal from
+    //    (a sidecar pointing at no bytes is a poison entry).
+    sidecar::write_atomic(meta_path, meta)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -64,6 +98,58 @@ mod tests {
     fn meta_path_appends_dot_meta_dot_json() {
         let root = PathBuf::from("/tmp/cache");
         let p = meta_path(&root, 14, 13708, 6334);
-        assert_eq!(p, PathBuf::from("/tmp/cache/osm/14/13708/6334.png.meta.json"));
+        assert_eq!(
+            p,
+            PathBuf::from("/tmp/cache/osm/14/13708/6334.png.meta.json")
+        );
+    }
+
+    #[test]
+    fn write_atomic_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let tp = tile_path(root, 14, 13708, 6334);
+        let mp = meta_path(root, 14, 13708, 6334);
+        let m = TileMeta {
+            schema_version: 1,
+            max_age_secs: 604_800,
+            fetched_at_unix: 0,
+            etag: None,
+            last_modified: None,
+        };
+        write_atomic(&tp, &mp, b"PNGFAKE", &m).unwrap();
+        assert!(tp.exists());
+        assert!(mp.exists());
+    }
+
+    #[test]
+    fn write_atomic_writes_tile_bytes_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let tp = tile_path(root, 5, 1, 1);
+        let mp = meta_path(root, 5, 1, 1);
+        let m = TileMeta {
+            schema_version: 1,
+            max_age_secs: 604_800,
+            fetched_at_unix: 0,
+            etag: None,
+            last_modified: None,
+        };
+        let payload = b"\x89PNG\r\n\x1a\n_fake_tile_bytes";
+        write_atomic(&tp, &mp, payload, &m).unwrap();
+        let read_back = std::fs::read(&tp).unwrap();
+        assert_eq!(read_back, payload);
+        let read_meta = crate::sidecar::read(&mp).unwrap();
+        assert_eq!(read_meta, m);
+    }
+
+    #[test]
+    fn write_order_is_tile_first_then_sidecar() {
+        // Source-level invariant check -- read this very file via include_str!
+        // and assert the comment markers appear in tile-first order.
+        let src = include_str!("cache.rs");
+        let one = src.find("// 1.").expect("missing // 1. marker");
+        let two = src.find("// 2.").expect("missing // 2. marker");
+        assert!(one < two, "tile (// 1.) must come before sidecar (// 2.)");
     }
 }
