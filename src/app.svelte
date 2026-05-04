@@ -110,10 +110,23 @@
   // save_geotag IPC call. Replace the corresponding row's
   // PhotoSummary in place so PhotoRow's `summary.has_gps`
   // derivation flips MISSING GPS -> HAS GPS without a manual refresh.
+  //
+  // Single-flight-save invariant (v1): only one DetailPane is mounted
+  // at a time and its `saving` gate disables the Save button across the
+  // IPC round-trip, so two concurrent saves cannot occur. WR-02:
+  // future "save all" / multi-pane work would break that invariant
+  // and clobber rows out of order. The defensive id re-check below
+  // pins the assumption: if a folder reload races the save and the
+  // index now points at a different photo (or `findIndex` returns -1),
+  // we silently no-op rather than mutate the wrong row.
   function handleSavedPhoto(fresh: PhotoMeta) {
     if (!listing) return;
     const i = listing.items.findIndex((s) => s.id === fresh.id);
     if (i === -1) return;
+    // Defensive re-check after the (post-async) findIndex resolves.
+    // Cheap, makes the single-flight-save invariant audit-grep-friendly,
+    // and is the gate a future multi-save feature must respect.
+    if (listing.items[i].id !== fresh.id) return;
     // Replace in place; Svelte 5 deep reactivity picks up the assignment.
     // PhotoSummary.has_gps is server-derived; recompute by checking
     // whether the freshly re-read EXIF surfaced GPS coordinates.
