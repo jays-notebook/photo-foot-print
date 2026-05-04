@@ -6,5 +6,6 @@
 
 pub mod exif; // Phase 1 — kept for ipc_smoke regression test.
 pub mod folder; // Phase 2 — open_folder_dialog, list_folder, read_photo_meta.
+pub mod geotag; // Phase 3 — save_geotag, get_session_last_pin.
 pub mod state; // Phase 2 — get_app_state.
 pub mod thumbnail; // Phase 2 — request_thumbnail (emits thumbnail-ready event).

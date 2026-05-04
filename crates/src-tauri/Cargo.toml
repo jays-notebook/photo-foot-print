@@ -28,6 +28,7 @@ sha2 = { workspace = true }                     # for path-hash id used by the p
 pfp-exif = { path = "../pfp-exif" }
 pfp-photos = { path = "../pfp-photos" }
 pfp-state = { path = "../pfp-state" }
+pfp-tiles = { path = "../pfp-tiles" }
 
 # Tokio is pulled transitively by tauri's `default` runtime feature, but we
 # need explicit Semaphore + spawn_blocking access from our async commands.

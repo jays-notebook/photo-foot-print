@@ -33,6 +33,12 @@ pub enum WireError {
     /// Phase 2: pfp-state persistence error (state.json read/write).
     #[error("state error: {detail}")]
     State { detail: String },
+
+    /// Phase 3: pfp_exif::write_gps failed during save_geotag. The atomic-write
+    /// contract (Phase 1 D-07) guarantees the original file is unchanged on
+    /// any failure path; the frontend surfaces this via plugin-dialog message().
+    #[error("exif write failed: {detail}")]
+    ExifWrite { detail: String },
 }
 
 impl From<pfp_exif::error::ExifError> for WireError {
