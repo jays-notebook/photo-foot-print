@@ -24,7 +24,7 @@ pub mod fetch;
 pub mod sidecar;
 
 pub use crate::error::TileError;
-pub use crate::fetch::build_osm_client;
+pub use crate::fetch::{build_osm_client, fetch_upstream_url, FreshTile};
 
 use std::path::PathBuf;
 
@@ -56,14 +56,98 @@ impl TileCache {
         Self { cache_root, http }
     }
 
-    /// Fetch a tile by `(z, x, y)`. Cache-hit / cache-miss / stale-revalidate
-    /// behavior is implemented in Plan 02; this signature is the contract.
-    pub async fn get_tile(
+    /// Fetch a tile by `(z, x, y)`.
+    ///
+    /// Behavior:
+    /// - Cache hit (tile + fresh sidecar): return cached bytes, no upstream
+    ///   request. `from_cache: true, was_stale: false`.
+    /// - Stale (sidecar age exceeds max_age_secs): return cached bytes
+    ///   immediately AND spawn a background revalidation task. The caller
+    ///   is unblocked the moment we have bytes; the next `get_tile` call
+    ///   typically observes a fresh sidecar.
+    ///   `from_cache: true, was_stale: true`.
+    /// - Sidecar Absent or Parse error (Pitfall 6): treated as STALE, NOT
+    ///   as miss. Cache self-heals via the spawned revalidation.
+    /// - Sidecar Io error (transient FS hiccup): return cached bytes,
+    ///   skip revalidation. Treated as fresh-enough for this call.
+    /// - Cache miss (no tile file): synchronously fetch upstream, write
+    ///   tile + sidecar atomically, return bytes.
+    ///   `from_cache: false, was_stale: false`.
+    pub async fn get_tile(&self, z: u8, x: u32, y: u32) -> Result<TileResponse, TileError> {
+        let tile_path = crate::cache::tile_path(&self.cache_root, z, x, y);
+        let meta_path = crate::cache::meta_path(&self.cache_root, z, x, y);
+
+        // Cache hit branch (tile file exists). Sidecar may be Absent / Parse / Io.
+        if tile_path.exists() {
+            let meta_result = crate::sidecar::read(&meta_path);
+            let now = crate::fetch::unix_now();
+            let (meta_for_revalidate, stale) = match meta_result {
+                Ok(m) => {
+                    let stale = now.saturating_sub(m.fetched_at_unix as u64) > m.max_age_secs;
+                    (Some(m), stale)
+                }
+                // Pitfall 6: Absent and Parse both treated as stale -> revalidate.
+                Err(crate::sidecar::SidecarReadError::Absent) => (None, true),
+                Err(crate::sidecar::SidecarReadError::Parse(_)) => (None, true),
+                // Transient FS hiccup -> return cached bytes, do NOT refetch.
+                Err(crate::sidecar::SidecarReadError::Io(_)) => (None, false),
+            };
+
+            let bytes = std::fs::read(&tile_path)?;
+            if stale {
+                // Spawn revalidation. Do NOT await -- caller already has bytes.
+                let this = self.clone();
+                let prev = meta_for_revalidate.clone();
+                tokio::spawn(async move {
+                    let _ = this.revalidate(z, x, y, prev).await;
+                });
+            }
+            return Ok(TileResponse {
+                bytes,
+                from_cache: true,
+                was_stale: stale,
+            });
+        }
+
+        // Cache miss branch -- synchronous upstream fetch.
+        let fresh = crate::fetch::fetch_upstream(&self.http, z, x, y, None).await?;
+        crate::cache::write_atomic(&tile_path, &meta_path, &fresh.bytes, &fresh.meta)?;
+        Ok(TileResponse {
+            bytes: fresh.bytes,
+            from_cache: false,
+            was_stale: false,
+        })
+    }
+
+    /// Background revalidation. Errors are eaten -- the caller already has
+    /// stale bytes; on transient failure we keep the cache as-is and try
+    /// again on the next stale read.
+    async fn revalidate(
         &self,
-        _z: u8,
-        _x: u32,
-        _y: u32,
-    ) -> Result<TileResponse, TileError> {
-        unimplemented!("Plan 02 implements get_tile (cache hit + miss + revalidate)")
+        z: u8,
+        x: u32,
+        y: u32,
+        prev: Option<crate::sidecar::TileMeta>,
+    ) -> Result<(), TileError> {
+        let tile_path = crate::cache::tile_path(&self.cache_root, z, x, y);
+        let meta_path = crate::cache::meta_path(&self.cache_root, z, x, y);
+        match crate::fetch::fetch_upstream(&self.http, z, x, y, prev.as_ref()).await {
+            Ok(fresh) => {
+                crate::cache::write_atomic(&tile_path, &meta_path, &fresh.bytes, &fresh.meta)?;
+            }
+            Err(TileError::UpstreamStatus(304)) => {
+                // 304 Not Modified -- bump fetched_at on the existing sidecar.
+                if let Some(mut p) = prev {
+                    p.fetched_at_unix = crate::fetch::unix_now() as i64;
+                    crate::sidecar::write_atomic(&meta_path, &p)?;
+                }
+            }
+            Err(_) => {
+                // Network down / 5xx / parse error -- cache stays as-is. v1
+                // is eprintln-only logging; structured logging is post-v1.
+                eprintln!("pfp-tiles: revalidate {z}/{x}/{y} failed (cache kept)");
+            }
+        }
+        Ok(())
     }
 }

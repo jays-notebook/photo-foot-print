@@ -29,10 +29,7 @@ pub fn meta_path(cache_root: &Path, z: u8, x: u32, y: u32) -> PathBuf {
     let mut p = tile_path(cache_root, z, x, y);
     // Append ".meta.json" by manipulating the file name; cannot use
     // `set_extension` because that would replace ".png".
-    let new_name = format!(
-        "{}.meta.json",
-        p.file_name().unwrap().to_str().unwrap()
-    );
+    let new_name = format!("{}.meta.json", p.file_name().unwrap().to_str().unwrap());
     p.set_file_name(new_name);
     p
 }
@@ -101,7 +98,10 @@ mod tests {
     fn meta_path_appends_dot_meta_dot_json() {
         let root = PathBuf::from("/tmp/cache");
         let p = meta_path(&root, 14, 13708, 6334);
-        assert_eq!(p, PathBuf::from("/tmp/cache/osm/14/13708/6334.png.meta.json"));
+        assert_eq!(
+            p,
+            PathBuf::from("/tmp/cache/osm/14/13708/6334.png.meta.json")
+        );
     }
 
     #[test]

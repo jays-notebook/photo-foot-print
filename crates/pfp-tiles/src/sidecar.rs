@@ -69,8 +69,7 @@ pub fn write_atomic(path: &Path, meta: &TileMeta) -> Result<(), TileError> {
     {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(tmp.as_file());
-        serde_json::to_writer(&mut w, meta)
-            .map_err(|e| TileError::Sidecar(e.to_string()))?;
+        serde_json::to_writer(&mut w, meta).map_err(|e| TileError::Sidecar(e.to_string()))?;
         w.flush()?;
     }
     tmp.as_file().sync_all()?;

@@ -111,7 +111,7 @@ async fn server_max_age_above_seven_days_is_preserved() {
         .mock_async(|when, then| {
             when.method(GET).path("/4/4/4.png");
             then.status(200)
-                .header("Cache-Control", &format!("public, max-age={two_weeks}"))
+                .header("Cache-Control", format!("public, max-age={two_weeks}"))
                 .body(b"_y");
         })
         .await;
