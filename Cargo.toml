@@ -41,6 +41,11 @@ sha2 = "0.10"
 dirs = "6"
 tauri-plugin-dialog = "2"
 
+# Phase 3 — HTTP client for OSM tile fetch (pfp-tiles)
+# Note: reqwest 0.13.x renamed the rustls-only feature from `rustls-tls` (0.12) to `rustls` (0.13).
+# Intent preserved: rustls only, no native-tls, no system OpenSSL dep.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
 [profile.release]
 strip = true
 lto = "thin"
