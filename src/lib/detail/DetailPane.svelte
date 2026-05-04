@@ -45,32 +45,47 @@
       error = null;
       return;
     }
+    // WR-01: cancellation token for out-of-order resolves. Without this,
+    // a rapid A->B selection sequence can land like
+    //   - B's IIFE starts, sets meta = null
+    //   - B's readPhotoMeta resolves, sets meta = mB
+    //   - A's still-pending readPhotoMeta finally resolves, overwrites
+    //     meta = mA -- visible filename header reads B (driven by
+    //     `summary.file_name`, which is current) but the EXIF readout,
+    //     map center, and pin all reflect A.
+    // Setting `cancelled = true` on effect re-run / teardown causes the
+    // older closure to short-circuit before any `meta = ...` assignment.
+    let cancelled = false;
     loading = true;
     error = null;
     void (async () => {
       try {
         const m = await readPhotoMeta(s.id);
-        meta = m;
+        if (cancelled) return;
         // D-25 / D-26 / D-27 initial center fallback chain:
         //   1. has-GPS  → photo coords
         //   2. no-GPS   + session_last_pin → last-saved coords
         //   3. no-GPS   + no last-pin     → Seoul default
-        if (m.gps) {
-          initialCenter = { lat: m.gps.lat, lng: m.gps.lng };
-        } else {
-          const last = await getSessionLastPin();
-          initialCenter = last ?? SEOUL_DEFAULT;
-        }
+        const nextCenter: GpsCoord = m.gps
+          ? { lat: m.gps.lat, lng: m.gps.lng }
+          : ((await getSessionLastPin()) ?? SEOUL_DEFAULT);
+        if (cancelled) return;
+        meta = m;
+        initialCenter = nextCenter;
         // pendingPin starts at the initial center.
         pendingPin = { ...initialCenter };
       } catch (e) {
+        if (cancelled) return;
         error = formatError(e);
         meta = null;
         pendingPin = null;
       } finally {
-        loading = false;
+        if (!cancelled) loading = false;
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   });
 
   // SaveBar.enabled: pendingPin differs from EXIF GPS (or there is no EXIF GPS).
