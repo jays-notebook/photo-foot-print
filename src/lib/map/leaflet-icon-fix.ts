@@ -13,6 +13,14 @@ import iconUrl from "leaflet/dist/images/marker-icon.png?url";
 import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png?url";
 import shadowUrl from "leaflet/dist/images/marker-shadow.png?url";
 
+// L.Icon.Default overrides _getIconUrl to derive the URL from imagePath +
+// name, which ignores the merged iconUrl/iconRetinaUrl/shadowUrl options.
+// Removing the prototype override lets the base L.Icon._getIconUrl read the
+// merged options, which is what makes the marker render under Vite.
+delete (
+  L.Icon.Default.prototype as { _getIconUrl?: unknown }
+)._getIconUrl;
+
 L.Icon.Default.mergeOptions({
   iconUrl,
   iconRetinaUrl,
