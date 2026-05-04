@@ -5,14 +5,41 @@
 //!
 //! The cache-miss path (one synchronous upstream GET) is covered by
 //! `tests/fetch_upstream.rs` against `fetch::fetch_upstream_url`.
+//!
+//! WR-03: the stale / corrupt / missing-sidecar tests below exercise the
+//! stale-while-revalidate spawn path, which fires `tokio::spawn` against
+//! `https://tile.openstreetmap.org/...`. To avoid issuing real OSMF hits
+//! during routine `cargo test`, we hand the cache a reqwest client whose
+//! `connect_timeout` is 1 ms -- the spawned revalidation aborts at the
+//! TCP connect stage long before any HTTP request leaves the host.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use pfp_tiles::{build_osm_client, TileCache, TileResponse};
+use pfp_tiles::{TileCache, TileResponse};
+
+/// Build a `reqwest::Client` that is structurally identical to the
+/// production `build_osm_client` (same User-Agent shape, same overall
+/// timeout) but with a `connect_timeout` so short that any real
+/// upstream attempt fails before the request leaves the host. Used by
+/// the stale-cache integration tests so they exercise the
+/// stale-while-revalidate spawn path without ever touching OSMF
+/// infrastructure (WR-03).
+fn build_offline_client() -> reqwest::Client {
+    let ua = format!(
+        "photo-foot-print/{} (+contact: jykim.loa2000@gmail.com; test-offline)",
+        env!("CARGO_PKG_VERSION")
+    );
+    reqwest::Client::builder()
+        .user_agent(ua)
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_millis(1))
+        .build()
+        .expect("offline reqwest client")
+}
 
 fn cache_with_root(root: PathBuf) -> TileCache {
-    let http = build_osm_client().expect("build osm client");
-    TileCache::new(root, http)
+    TileCache::new(root, build_offline_client())
 }
 
 fn write_fixture_tile(
