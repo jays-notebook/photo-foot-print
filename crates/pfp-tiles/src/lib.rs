@@ -128,7 +128,17 @@ impl TileCache {
             let now = crate::fetch::unix_now();
             let (meta_for_revalidate, stale) = match meta_result {
                 Ok(m) => {
-                    let stale = now.saturating_sub(m.fetched_at_unix as u64) > m.max_age_secs;
+                    // WR-04: clamp negative `fetched_at_unix` to 0 BEFORE the
+                    // u64 cast. A bare `as u64` on a negative i64 reinterprets
+                    // the two's-complement bits to a near-`u64::MAX` value;
+                    // `now.saturating_sub(huge)` then saturates to 0 and the
+                    // tile is treated as freshly fetched -- forever. The same
+                    // clamp also tames the (less likely) `fetched_at > now`
+                    // clock-skew case: we treat such tiles as just-fetched
+                    // (age == 0), which is the conservative non-staleness
+                    // answer when we cannot trust the recorded timestamp.
+                    let fetched = m.fetched_at_unix.max(0) as u64;
+                    let stale = now.saturating_sub(fetched) > m.max_age_secs;
                     (Some(m), stale)
                 }
                 // Pitfall 6: Absent and Parse both treated as stale -> revalidate.

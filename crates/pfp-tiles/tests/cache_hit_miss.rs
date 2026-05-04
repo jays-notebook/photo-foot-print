@@ -167,3 +167,40 @@ async fn missing_sidecar_treated_as_stale_returns_cached_bytes() {
     assert!(was_stale);
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 }
+
+#[tokio::test]
+async fn negative_fetched_at_unix_is_treated_as_stale_not_fresh() {
+    // WR-04: a hand-edited / corrupt sidecar with a negative
+    // `fetched_at_unix` previously bit-cast to a near-`u64::MAX` value;
+    // `now.saturating_sub(huge)` saturated to 0 and the tile was
+    // PERMANENTLY treated as freshly fetched -- staleness check
+    // disabled for the lifetime of the on-disk cache. After the fix
+    // the cast goes through `.max(0)`, so negative timestamps land at
+    // age = now and trigger revalidation past the 7-day floor.
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_with_root(dir.path().to_path_buf());
+
+    let z = 9;
+    let x = 1;
+    let y = 2;
+    let bad_meta = pfp_tiles::sidecar::TileMeta {
+        schema_version: 1,
+        max_age_secs: 7 * 86_400,
+        fetched_at_unix: -1, // pre-1970, i.e., almost certainly corrupt.
+        etag: None,
+        last_modified: None,
+    };
+    write_fixture_tile(dir.path(), z, x, y, b"_neg_ts_tile", bad_meta);
+
+    let TileResponse {
+        bytes,
+        from_cache,
+        was_stale,
+    } = cache.get_tile(z, x, y).await.unwrap();
+    assert_eq!(bytes, b"_neg_ts_tile");
+    assert!(from_cache);
+    // The KEY assertion: WITHOUT the WR-04 fix, was_stale would be
+    // false (the bit-cast wraparound erroneously labels the tile fresh).
+    assert!(was_stale, "negative fetched_at_unix MUST be treated as stale (not fresh-forever via i64-as-u64 wraparound)");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+}
