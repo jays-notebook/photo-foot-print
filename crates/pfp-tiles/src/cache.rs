@@ -25,13 +25,21 @@ pub fn tile_path(cache_root: &Path, z: u8, x: u32, y: u32) -> PathBuf {
 }
 
 /// Compute the absolute path for the tile sidecar JSON.
+///
+/// WR-05: build the path directly via `format!("{y}.png.meta.json")`
+/// rather than going through `tile_path` + `file_name().unwrap().to_str().unwrap()`.
+/// The unwraps were unreachable in practice (production callers always
+/// build through `tile_path` which produces an ASCII filename), but the
+/// function takes `&Path`; a future cleanup-utility caller passing a
+/// path with no UTF-8 file name would have panicked on the URI scheme
+/// handler thread. This formulation matches the layout invariant
+/// documented at the top of this file with no panic surface.
 pub fn meta_path(cache_root: &Path, z: u8, x: u32, y: u32) -> PathBuf {
-    let mut p = tile_path(cache_root, z, x, y);
-    // Append ".meta.json" by manipulating the file name; cannot use
-    // `set_extension` because that would replace ".png".
-    let new_name = format!("{}.meta.json", p.file_name().unwrap().to_str().unwrap());
-    p.set_file_name(new_name);
-    p
+    cache_root
+        .join("osm")
+        .join(z.to_string())
+        .join(x.to_string())
+        .join(format!("{y}.png.meta.json"))
 }
 
 /// Atomic tile + sidecar write. Tile FIRST, sidecar SECOND so a crash
