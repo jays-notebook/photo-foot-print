@@ -19,13 +19,11 @@ pub fn run() {
         // hook that resolves app_cache_dir() and constructs TileCache once.
         .setup(|app| {
             use tauri::Manager;
-            let cache_root = app
-                .path()
-                .app_cache_dir()
-                .map_err(|e| {
-                    Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-                })?
-                .join("tiles");
+            // Resolve cache_root via app.path().app_cache_dir() (Phase 3 D-30).
+            let resolved = app.path().app_cache_dir().map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+            })?;
+            let cache_root = resolved.join("tiles");
             let http = pfp_tiles::build_osm_client().map_err(|e| {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;

@@ -82,8 +82,7 @@ impl Default for TauriAppState {
         // we go through pfp-tiles' public API surface for client construction.
         let tiles = pfp_tiles::TileCache::new(
             std::env::temp_dir().join("pfp-tiles-test-cache"),
-            pfp_tiles::build_osm_client()
-                .expect("build_osm_client (test default)"),
+            pfp_tiles::build_osm_client().expect("build_osm_client (test default)"),
         );
         Self::with_tiles(tiles)
     }
