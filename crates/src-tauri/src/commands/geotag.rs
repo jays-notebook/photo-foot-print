@@ -46,17 +46,35 @@ pub async fn save_geotag(
 ) -> Result<PhotoMeta, WireError> {
     let path = resolve_id(&state, &id)?;
 
+    // CR-01: pfp_exif::write_gps + pfp_exif::read_detail are synchronous,
+    // fsync-heavy file I/O (full JPEG copy + F_FULLFSYNC + parent-dir fsync
+    // + EXIF re-parse). Running them on the Tauri async runtime thread
+    // would stall every sibling task — including the pfp-thumb:// and
+    // pfp-tile:// URI scheme handlers that share the runtime. Mirror the
+    // discipline already established in commands/thumbnail.rs:100 and
+    // hand the blocking work to a dedicated thread via spawn_blocking.
+    //
     // D-40: GPS-only. None for altitude AND dto in Phase 3.
-    // Explicit `.map_err` to ExifWrite (NOT the From<ExifError> impl
-    // which would map to Exif — used for read failures).
-    pfp_exif::write_gps(&path, lat, lng, None, None).map_err(|e| WireError::ExifWrite {
-        detail: e.to_string(),
-    })?;
-
-    // Re-read the file to produce fresh PhotoMeta. Reuses the Phase 2
-    // read path; the frontend swaps this into its Svelte store and
-    // reactivity flips the GpsBadge + ExifReadout (D-42 silent feedback).
-    let detail = pfp_exif::read_detail(&path)?;
+    // Explicit `.map_err` to ExifWrite for the write step (NOT the
+    // From<ExifError> impl which would map to Exif — that lane is
+    // reserved for read failures).
+    let path_for_blocking = path.clone();
+    let detail = tokio::task::spawn_blocking(move || {
+        pfp_exif::write_gps(&path_for_blocking, lat, lng, None, None).map_err(|e| {
+            WireError::ExifWrite {
+                detail: e.to_string(),
+            }
+        })?;
+        // Re-read the file to produce fresh PhotoMeta. Reuses the Phase 2
+        // read path; the frontend swaps this into its Svelte store and
+        // reactivity flips the GpsBadge + ExifReadout (D-42 silent feedback).
+        let detail = pfp_exif::read_detail(&path_for_blocking)?;
+        Ok::<_, WireError>(detail)
+    })
+    .await
+    .map_err(|e| WireError::Io {
+        detail: format!("save_geotag join: {e}"),
+    })??;
 
     let file_name = path
         .file_name()
