@@ -35,10 +35,47 @@ pub fn build_osm_client() -> Result<reqwest::Client, TileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL};
 
     #[test]
     fn build_osm_client_constructs_without_panic() {
         let c = build_osm_client();
         assert!(c.is_ok(), "expected Ok, got {c:?}");
+    }
+
+    fn header_with(cc: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(CACHE_CONTROL, HeaderValue::from_str(cc).unwrap());
+        h
+    }
+
+    #[test]
+    fn parse_max_age_happy_path() {
+        let h = header_with("public, max-age=86400");
+        assert_eq!(parse_cache_control_max_age(&h), Some(86_400));
+    }
+
+    #[test]
+    fn parse_max_age_first_directive() {
+        let h = header_with("max-age=42, public");
+        assert_eq!(parse_cache_control_max_age(&h), Some(42));
+    }
+
+    #[test]
+    fn parse_max_age_no_directive() {
+        let h = header_with("public, no-cache");
+        assert_eq!(parse_cache_control_max_age(&h), None);
+    }
+
+    #[test]
+    fn parse_max_age_missing_header() {
+        let h = HeaderMap::new();
+        assert_eq!(parse_cache_control_max_age(&h), None);
+    }
+
+    #[test]
+    fn parse_max_age_malformed_value() {
+        let h = header_with("max-age=not-a-number");
+        assert_eq!(parse_cache_control_max_age(&h), None);
     }
 }
