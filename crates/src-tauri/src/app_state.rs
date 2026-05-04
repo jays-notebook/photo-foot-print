@@ -72,12 +72,18 @@ impl TauriAppState {
 
 impl Default for TauriAppState {
     fn default() -> Self {
-        // Test-only: wire a TileCache against a tempdir + dummy reqwest
+        // Test-only: wire a TileCache against a tempdir + the OSMF reqwest
         // client. The production path goes through `with_tiles`; tests
-        // exercise this default freely.
+        // exercise this default freely. `build_osm_client` only fails on
+        // unrecoverable TLS-stack init errors which would also break any
+        // production startup, so `.expect()` is acceptable here.
+        //
+        // D-08 cleanliness: src-tauri does NOT take a direct `reqwest` dep;
+        // we go through pfp-tiles' public API surface for client construction.
         let tiles = pfp_tiles::TileCache::new(
             std::env::temp_dir().join("pfp-tiles-test-cache"),
-            pfp_tiles::build_osm_client().unwrap_or_else(|_| reqwest::Client::new()),
+            pfp_tiles::build_osm_client()
+                .expect("build_osm_client (test default)"),
         );
         Self::with_tiles(tiles)
     }
