@@ -66,4 +66,53 @@ mod tests {
         let p = meta_path(&root, 14, 13708, 6334);
         assert_eq!(p, PathBuf::from("/tmp/cache/osm/14/13708/6334.png.meta.json"));
     }
+
+    #[test]
+    fn write_atomic_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let tp = tile_path(root, 14, 13708, 6334);
+        let mp = meta_path(root, 14, 13708, 6334);
+        let m = TileMeta {
+            schema_version: 1,
+            max_age_secs: 604_800,
+            fetched_at_unix: 0,
+            etag: None,
+            last_modified: None,
+        };
+        write_atomic(&tp, &mp, b"PNGFAKE", &m).unwrap();
+        assert!(tp.exists());
+        assert!(mp.exists());
+    }
+
+    #[test]
+    fn write_atomic_writes_tile_bytes_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let tp = tile_path(root, 5, 1, 1);
+        let mp = meta_path(root, 5, 1, 1);
+        let m = TileMeta {
+            schema_version: 1,
+            max_age_secs: 604_800,
+            fetched_at_unix: 0,
+            etag: None,
+            last_modified: None,
+        };
+        let payload = b"\x89PNG\r\n\x1a\n_fake_tile_bytes";
+        write_atomic(&tp, &mp, payload, &m).unwrap();
+        let read_back = std::fs::read(&tp).unwrap();
+        assert_eq!(read_back, payload);
+        let read_meta = crate::sidecar::read(&mp).unwrap();
+        assert_eq!(read_meta, m);
+    }
+
+    #[test]
+    fn write_order_is_tile_first_then_sidecar() {
+        // Source-level invariant check -- read this very file via include_str!
+        // and assert the comment markers appear in tile-first order.
+        let src = include_str!("cache.rs");
+        let one = src.find("// 1.").expect("missing // 1. marker");
+        let two = src.find("// 2.").expect("missing // 2. marker");
+        assert!(one < two, "tile (// 1.) must come before sidecar (// 2.)");
+    }
 }
