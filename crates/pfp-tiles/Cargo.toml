@@ -7,4 +7,14 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Reserved for Phase 3 — no deps yet.
+reqwest = { workspace = true }
+tokio = { version = "1", features = ["sync", "time", "rt"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+httpmock = "0.7"
