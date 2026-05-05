@@ -37,7 +37,7 @@ use std::path::Path;
 use little_exif::{exif_tag::ExifTag, metadata::Metadata, rational::uR64};
 
 use crate::gps::signed_deg_to_rational_with_ref;
-use crate::time::set_datetime_original;
+use crate::time::set_capture_time;
 
 /// Write GPS coordinates (and optionally altitude + DateTimeOriginal) to a JPEG.
 ///
@@ -91,7 +91,7 @@ pub fn write_gps(
         }
 
         if let Some(dto_str) = dto {
-            set_datetime_original(&mut metadata, dto_str).map_err(|e| {
+            set_capture_time(&mut metadata, dto_str).map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
             })?;
         }
