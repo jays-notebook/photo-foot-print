@@ -105,12 +105,20 @@
 
   async function onSave() {
     if (!meta || !pendingPin || !summary) return;
+    // Phase 4 Task 2 bridge: SaveDialogProps widened with newDto/oldDto/
+    // dirtyCoords/dirtyDto. Until Task 4 wires DateTimeEditor into the
+    // DetailPane reactive state, treat capture-time as never-dirty so
+    // the dialog renders coords-only — exact Phase 3 behavior.
     const confirmed = await confirmSaveGeotag({
       fileName: summary.file_name,
       newLat: pendingPin.lat,
       newLng: pendingPin.lng,
       oldLat: meta.gps?.lat ?? null,
       oldLng: meta.gps?.lng ?? null,
+      newDto: null,
+      oldDto: meta.capture_time ?? null,
+      dirtyCoords: true,
+      dirtyDto: false,
     });
     if (!confirmed) return;
     saving = true;
