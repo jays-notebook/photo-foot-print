@@ -210,19 +210,38 @@ mod tests {
         assert!(s.contains("\"detail\":\"boom\""), "got: {s}");
     }
 
-    /// Plan 03-03 Task 3 RED gate: pin TauriAppState::with_tiles seeds the
-    /// new three Phase 3 fields correctly.
+    /// Plan 03-03 Task 3 RED gate (extended for Plan 04-03 Task 1):
+    /// pin TauriAppState::with_tiles seeds the Phase 3 fields correctly
+    /// AND honours the Phase 4 D-46 widened signature
+    /// `with_tiles(tiles, initial_last_pin: Option<(f64, f64)>)`.
     #[test]
     fn tauri_app_state_with_tiles_seeds_phase3_fields() {
         use crate::app_state::TauriAppState;
-        let tiles = pfp_tiles::TileCache::new(
-            std::env::temp_dir().join("pfp-with-tiles-test"),
+
+        // Phase 4 (D-46): Some(...) seed lands in session_last_pin Mutex.
+        let tiles_some = pfp_tiles::TileCache::new(
+            std::env::temp_dir().join("pfp-with-tiles-test-some"),
             pfp_tiles::build_osm_client().unwrap(),
         );
-        let s = TauriAppState::with_tiles(tiles);
-        // session_last_pin starts as None.
-        assert!(s.session_last_pin.lock().unwrap().is_none());
-        // tile_fetch_semaphore has 4 permits per D-35.
-        assert_eq!(s.tile_fetch_semaphore.available_permits(), 4);
+        let s_some = TauriAppState::with_tiles(tiles_some, Some((35.0, 139.0)));
+        assert_eq!(
+            *s_some.session_last_pin.lock().unwrap(),
+            Some((35.0, 139.0)),
+            "Some((35.0, 139.0)) seed must land in session_last_pin"
+        );
+        // tile_fetch_semaphore has 4 permits per D-35 (regression guard).
+        assert_eq!(s_some.tile_fetch_semaphore.available_permits(), 4);
+
+        // Phase 3 baseline regression: None seed → session_last_pin == None.
+        let tiles_none = pfp_tiles::TileCache::new(
+            std::env::temp_dir().join("pfp-with-tiles-test-none"),
+            pfp_tiles::build_osm_client().unwrap(),
+        );
+        let s_none = TauriAppState::with_tiles(tiles_none, None);
+        assert!(
+            s_none.session_last_pin.lock().unwrap().is_none(),
+            "None seed must leave session_last_pin as None"
+        );
+        assert_eq!(s_none.tile_fetch_semaphore.available_permits(), 4);
     }
 }
