@@ -8,8 +8,18 @@
     initialCenter: { lat: number; lng: number };
     initialZoom: number;
     onPinChange: (lat: number, lng: number) => void;
+    /** Phase 4 (UI-SPEC §11.2): paste-applied coords. When non-null and
+     *  changed, the map recenters and the marker moves WITHOUT resetting
+     *  the zoom level. Null = no programmatic override; map honors only
+     *  click / drag / initialCenter changes. */
+    pendingPin?: { lat: number; lng: number } | null;
   }
-  let { initialCenter, initialZoom, onPinChange }: Props = $props();
+  let {
+    initialCenter,
+    initialZoom,
+    onPinChange,
+    pendingPin = null,
+  }: Props = $props();
 
   // CRITICAL: these are plain `let`, NOT $state. Leaflet mutates internal
   // state on every interaction; $state would trigger spurious Svelte
@@ -75,6 +85,21 @@
     if (!map || !marker) return;
     map.setView([initialCenter.lat, initialCenter.lng], initialZoom);
     marker.setLatLng([initialCenter.lat, initialCenter.lng]);
+  });
+
+  // Phase 4 (UI-SPEC §11.2): paste-applied coords recenter the map without
+  // resetting zoom. The Phase 3 click/drag path stays untouched — pendingPin
+  // is purely a one-way top-down signal from DetailPane.
+  //
+  // Loop guard: this effect MUST NOT call onPinChange. The marker move is
+  // visual-only; the authoritative pendingPin lives in DetailPane and was
+  // already updated by CoordsPasteRow.onApply before this effect fires.
+  $effect(() => {
+    if (!map || !marker) return;
+    if (!pendingPin) return;
+    const z = map.getZoom();
+    map.setView([pendingPin.lat, pendingPin.lng], z);
+    marker.setLatLng([pendingPin.lat, pendingPin.lng]);
   });
 </script>
 

@@ -105,16 +105,22 @@ export async function requestThumbnail(id: string): Promise<RequestThumbnailAck>
   return await invoke<RequestThumbnailAck>("request_thumbnail", { id });
 }
 
-/** Phase 3: write GPS coords to the photo's EXIF. Returns the fresh PhotoMeta
- *  re-read from the file after the atomic write completes. On any failure,
- *  the original file is unchanged (Phase 1 D-07 atomic-write contract); the
- *  error surfaces as WireError with kind === "exif_write". */
+/** Phase 3 / Phase 4 (D-58): write GPS coords AND optional DateTimeOriginal
+ *  (with companion DateTimeDigitized via Plan 04-02) to the photo's EXIF.
+ *  Returns the fresh PhotoMeta re-read from the file after the atomic
+ *  write completes. On any failure, the original file is unchanged
+ *  (Phase 1 D-07 atomic-write contract); the error surfaces as WireError
+ *  with kind === "exif_write".
+ *
+ *  `dto` is the EXIF wire format 'YYYY:MM:DD HH:MM:SS' or null. Snake_case
+ *  on the wire — JS `null` deserialises to Rust `Option::<String>::None`. */
 export async function saveGeotag(
   id: string,
   lat: number,
   lng: number,
+  dto: string | null,
 ): Promise<PhotoMeta> {
-  return await invoke<PhotoMeta>("save_geotag", { id, lat, lng });
+  return await invoke<PhotoMeta>("save_geotag", { id, lat, lng, dto });
 }
 
 /** Phase 3: read the in-session last-saved pin (D-27/D-28). Returns null if

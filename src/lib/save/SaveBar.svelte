@@ -1,26 +1,31 @@
 <script lang="ts">
   interface Props {
-    /** True when pendingPin differs from currentExif OR currentExif is null. */
+    /** True when pendingPin OR pendingDto differs from saved values. */
     enabled: boolean;
     /** True while save_geotag is in flight. */
     saving: boolean;
     /** Click handler — DetailPane orchestrates the dialog + IPC flow. */
     onSave: () => void;
+    /** Phase 4 (UI-SPEC §11.5): precomputed hint string for the
+     *  "no pending change" state. DetailPane derives this from the
+     *  (pin, DTO) match mix. Null falls back to the Phase 3 default. */
+    hint?: string | null;
   }
-  let { enabled, saving, onSave }: Props = $props();
+  let { enabled, saving, onSave, hint = null }: Props = $props();
 
   // UI-SPEC §Save button states: label switches to "Saving..." while in flight.
   // Three ASCII dots, NOT the unicode ellipsis (UI-SPEC copy invariant).
   let label = $derived(saving ? "Saving..." : "Save");
 
-  // UI-SPEC §Save bar states: hint shown only in the "no pending change" state
-  // (i.e. button is disabled because pending matches EXIF AND not saving).
+  // UI-SPEC §11.5: hint shown only in the "no pending change" state.
+  // Defaults to the Phase 3 string when no override is provided.
   let showHint = $derived(!enabled && !saving);
+  let hintText = $derived(hint ?? "Pin matches saved location.");
 </script>
 
 <div class="save-bar">
   {#if showHint}
-    <span class="hint">Pin matches saved location.</span>
+    <span class="hint">{hintText}</span>
   {:else}
     <span class="hint" aria-hidden="true"></span>
   {/if}

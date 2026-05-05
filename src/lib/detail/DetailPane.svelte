@@ -13,6 +13,8 @@
   import MapPane from "../map/MapPane.svelte";
   import SaveBar from "../save/SaveBar.svelte";
   import { confirmSaveGeotag, showSaveError } from "../save/saveDialog";
+  import CoordsPasteRow from "../coords/CoordsPasteRow.svelte";
+  import DateTimeEditor from "../datetime/DateTimeEditor.svelte";
 
   interface Props {
     summary: PhotoSummary | null;
@@ -21,8 +23,7 @@
   }
   let { summary, onSaved }: Props = $props();
 
-  // Default seed: Seoul City Hall (D-26). Used when there is no EXIF GPS
-  // AND no session_last_pin yet.
+  // Default seed: Seoul City Hall (D-26).
   const SEOUL_DEFAULT: GpsCoord = { lat: 37.5665, lng: 126.978 };
   const DEFAULT_ZOOM = 13;
 
@@ -30,10 +31,17 @@
   let loading = $state(false);
   let error: string | null = $state(null);
 
-  // Pending pin (UX-only state — never written to disk until Save clicked).
   let pendingPin: GpsCoord | null = $state(null);
-  // Initial map center for the currently-selected photo. Recomputed every
-  // time `meta` changes.
+  // Phase 4 (D-61): pendingDto is the editable DTO mirror — null when
+  // either the file has no capture_time OR the user cleared the input.
+  // Initialised inside the WR-01 cancellation-tokened $effect so a
+  // rapid A→B selection sequence cannot land A's pendingDto after B's
+  // photo is already showing.
+  let pendingDto: string | null = $state(null);
+  // Informational; live error rendering lives inside CoordsPasteRow.
+  // Reserved for cross-component signaling per outline seed 7.
+  let pasteError: string | null = $state(null);
+
   let initialCenter: GpsCoord = $state(SEOUL_DEFAULT);
   let saving = $state(false);
 
@@ -42,19 +50,12 @@
     if (!s) {
       meta = null;
       pendingPin = null;
+      pendingDto = null;
+      pasteError = null;
       error = null;
       return;
     }
-    // WR-01: cancellation token for out-of-order resolves. Without this,
-    // a rapid A->B selection sequence can land like
-    //   - B's IIFE starts, sets meta = null
-    //   - B's readPhotoMeta resolves, sets meta = mB
-    //   - A's still-pending readPhotoMeta finally resolves, overwrites
-    //     meta = mA -- visible filename header reads B (driven by
-    //     `summary.file_name`, which is current) but the EXIF readout,
-    //     map center, and pin all reflect A.
-    // Setting `cancelled = true` on effect re-run / teardown causes the
-    // older closure to short-circuit before any `meta = ...` assignment.
+    // WR-01: cancellation token covers pendingPin AND (Phase 4) pendingDto.
     let cancelled = false;
     loading = true;
     error = null;
@@ -62,23 +63,23 @@
       try {
         const m = await readPhotoMeta(s.id);
         if (cancelled) return;
-        // D-25 / D-26 / D-27 initial center fallback chain:
-        //   1. has-GPS  → photo coords
-        //   2. no-GPS   + session_last_pin → last-saved coords
-        //   3. no-GPS   + no last-pin     → Seoul default
         const nextCenter: GpsCoord = m.gps
           ? { lat: m.gps.lat, lng: m.gps.lng }
           : ((await getSessionLastPin()) ?? SEOUL_DEFAULT);
         if (cancelled) return;
         meta = m;
         initialCenter = nextCenter;
-        // pendingPin starts at the initial center.
         pendingPin = { ...initialCenter };
+        // Phase 4 (D-61 + UI-SPEC §11.6): pendingDto initial-set is gated
+        // by the same `cancelled` flag.
+        pendingDto = m.capture_time;
+        pasteError = null;
       } catch (e) {
         if (cancelled) return;
         error = formatError(e);
         meta = null;
         pendingPin = null;
+        pendingDto = null;
       } finally {
         if (!cancelled) loading = false;
       }
@@ -88,9 +89,9 @@
     };
   });
 
-  // SaveBar.enabled: pendingPin differs from EXIF GPS (or there is no EXIF GPS).
-  // Compared at 6-decimal precision per D-39 / Pitfall 11.
-  let saveEnabled = $derived.by(() => {
+  // Phase 4 (D-59): split into pinDirty + dtoDirty; saveEnabled is the OR.
+  // 6-decimal compare on pinDirty preserved (Pitfall 11 / D-39).
+  let pinDirty = $derived.by(() => {
     if (!pendingPin || !meta) return false;
     if (!meta.gps) return true; // first-write case (D-37)
     return (
@@ -98,44 +99,68 @@
       pendingPin.lng.toFixed(6) !== meta.gps.lng.toFixed(6)
     );
   });
+  let dtoDirty = $derived.by(() => {
+    const m = meta;
+    return pendingDto !== (m ? m.capture_time : null);
+  });
+  let saveEnabled = $derived(pinDirty || dtoDirty);
+
+  // UI-SPEC §11.5: hint widening. Three deterministic strings + the
+  // Phase 3 fallback when meta is not yet loaded. Hidden entirely when
+  // enabled (SaveBar's own `showHint` derives from `!enabled && !saving`).
+  let saveBarHint = $derived.by(() => {
+    if (!meta) return null; // SaveBar falls back to Phase 3 default
+    if (meta.gps !== null && meta.capture_time !== null) {
+      return "Pin and capture time match saved values.";
+    }
+    if (meta.gps !== null && meta.capture_time === null) {
+      return "Pin matches saved location. No capture time recorded.";
+    }
+    return null; // SaveBar falls back to Phase 3 default
+  });
 
   function onPinChange(lat: number, lng: number) {
     pendingPin = { lat, lng };
   }
 
+  function onPasteApply(lat: number, lng: number) {
+    // UI-SPEC §11.2: paste-applied coords flow into pendingPin; the
+    // pendingPin prop on MapPane drives a marker.setLatLng + map.setView.
+    pendingPin = { lat, lng };
+  }
+
+  function onDtoChange(next: string | null) {
+    pendingDto = next;
+  }
+
   async function onSave() {
     if (!meta || !pendingPin || !summary) return;
-    // Phase 4 Task 2 bridge: SaveDialogProps widened with newDto/oldDto/
-    // dirtyCoords/dirtyDto. Until Task 4 wires DateTimeEditor into the
-    // DetailPane reactive state, treat capture-time as never-dirty so
-    // the dialog renders coords-only — exact Phase 3 behavior.
     const confirmed = await confirmSaveGeotag({
       fileName: summary.file_name,
       newLat: pendingPin.lat,
       newLng: pendingPin.lng,
       oldLat: meta.gps?.lat ?? null,
       oldLng: meta.gps?.lng ?? null,
-      newDto: null,
-      oldDto: meta.capture_time ?? null,
-      dirtyCoords: true,
-      dirtyDto: false,
+      newDto: pendingDto,
+      oldDto: meta.capture_time,
+      dirtyCoords: pinDirty,
+      dirtyDto: dtoDirty,
     });
     if (!confirmed) return;
     saving = true;
     try {
+      // Phase 4 (D-58): widened IPC carries pendingDto end-to-end.
       // eslint-disable-next-line prettier/prettier -- single-line for plan literal-grep
-      const fresh = await saveGeotag(summary.id, pendingPin.lat, pendingPin.lng);
-      // D-42: silent post-save feedback. Replace meta locally; bubble
-      // fresh PhotoMeta up so the parent updates listing.items[i] and
-      // the row's GpsBadge re-derives via Svelte reactivity (EXIF-10).
+      const fresh = await saveGeotag(summary.id, pendingPin.lat, pendingPin.lng, pendingDto);
       meta = fresh;
-      // pendingPin now matches fresh.gps → SaveBar disables.
       if (fresh.gps) {
         pendingPin = { lat: fresh.gps.lat, lng: fresh.gps.lng };
       }
+      // Phase 4 (D-61): reset DTO mirror to the freshly-written value so
+      // SaveBar disables again after a successful save.
+      pendingDto = fresh.capture_time;
       onSaved?.(fresh);
     } catch (e) {
-      // D-41: native error dialog; keep pendingPin so user can retry.
       const wire = asWireError(e);
       await showSaveError(
         summary.file_name,
@@ -158,6 +183,7 @@
         {initialCenter}
         initialZoom={DEFAULT_ZOOM}
         {onPinChange}
+        {pendingPin}
       />
     {/if}
   </div>
@@ -168,9 +194,15 @@
     <p class="error">{error}</p>
   {:else if meta}
     <ExifReadout {meta} />
+    <CoordsPasteRow onApply={onPasteApply} />
+    <DateTimeEditor value={pendingDto} onChange={onDtoChange} />
+    {#if pasteError}
+      <!-- Reserved cross-component signal slot per outline seed 7. -->
+      <p class="error">{pasteError}</p>
+    {/if}
   {/if}
 
-  <SaveBar enabled={saveEnabled} {saving} {onSave} />
+  <SaveBar enabled={saveEnabled} {saving} {onSave} hint={saveBarHint} />
 {/if}
 
 <style>
