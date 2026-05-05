@@ -12,9 +12,10 @@
 //!     path is reserved for pfp-exif::atomic in-place EXIF writes -- see
 //!     Phase 1 atomic.rs).
 //!   - Forward compatibility: schema_version defaults to 1 via serde
-//!     `default = "schema_version_default"`. Phase 4 will add last_pin and
-//!     capture_time_default fields; reading an old (Phase 2) state.json
-//!     still works because Option fields default to None.
+//!     `default = "schema_version_default"`. Phase 4 added `last_pin:
+//!     Option<(f64, f64)>`; reading a Phase 2 / Phase 3 state.json still
+//!     works because Option fields default to None and `schema_version`
+//!     stays at 1 (additive-only schema evolution).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -29,8 +30,9 @@ const STATE_FILE: &str = "state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppState {
-    /// Schema version for forward-compat. Phase 4 will bump to 2 when adding
-    /// last_pin: Option<(f64, f64)>.
+    /// Schema version for forward-compat. Phase 4 added `last_pin`
+    /// additively without bumping; future migrations will bump only when
+    /// a non-additive change lands.
     #[serde(default = "schema_version_default")]
     pub schema_version: u32,
 
@@ -38,6 +40,15 @@ pub struct AppState {
     /// or after the user has never opened a folder.
     #[serde(default)]
     pub last_folder: Option<PathBuf>,
+
+    /// Phase 4 (D-44 / D-46 / MAP-03): most recently saved pin (lat, lng).
+    /// None on first launch or before any successful `save_geotag`. Re-set
+    /// on every successful save; the Tauri host's `.setup` hook reads this
+    /// value at boot to seed `TauriAppState.session_last_pin` (Plan 04-03).
+    /// Additive: a Phase 2 / Phase 3 state.json (without this key) loads as
+    /// `None` because of `#[serde(default)]`.
+    #[serde(default)]
+    pub last_pin: Option<(f64, f64)>,
 }
 
 impl Default for AppState {
@@ -45,6 +56,7 @@ impl Default for AppState {
         Self {
             schema_version: schema_version_default(),
             last_folder: None,
+            last_pin: None,
         }
     }
 }
@@ -128,6 +140,17 @@ pub fn save_last_folder(folder: &Path) -> Result<(), StateError> {
     save(&state)
 }
 
+/// Convenience: load current state (or default), update `last_pin`, save.
+/// Phase 4 (D-45): the Tauri host's `save_geotag` IPC calls this from
+/// inside its `spawn_blocking` block after `pfp_exif::write_gps` succeeds.
+/// On Err, the IPC layer logs and swallows (D-47 -- best-effort
+/// persistence). This lib stays fail-loud and surfaces `StateError`.
+pub fn save_last_pin(lat: f64, lng: f64) -> Result<(), StateError> {
+    let mut state = load()?;
+    state.last_pin = Some((lat, lng));
+    save(&state)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{AppState, StateError};
@@ -205,8 +228,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("state.json");
 
-        let mut state = AppState::default();
-        state.last_pin = Some((35.6586, 139.7454));
+        let state = AppState {
+            last_pin: Some((35.6586, 139.7454)),
+            ..AppState::default()
+        };
         crate::save_to(&path, &state).expect("save_to succeeds");
 
         let loaded = crate::load_from(&path).expect("load_from succeeds");

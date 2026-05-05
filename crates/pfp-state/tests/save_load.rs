@@ -11,6 +11,7 @@ fn round_trip_preserves_all_fields() {
     let original = AppState {
         schema_version: 1,
         last_folder: Some(PathBuf::from("/tmp/scans-2026-05")),
+        last_pin: None,
     };
     save_to(&state_path, &original).expect("save");
     let loaded = load_from(&state_path).expect("load");
@@ -76,6 +77,7 @@ fn save_to_creates_parent_dir() {
     let state = AppState {
         schema_version: 1,
         last_folder: Some(PathBuf::from("/tmp/y")),
+        last_pin: None,
     };
     save_to(&nested, &state).expect("save creates parents");
     assert!(nested.exists());
@@ -92,6 +94,7 @@ fn save_overwrites_existing() {
         &AppState {
             schema_version: 1,
             last_folder: Some(PathBuf::from("/old")),
+            last_pin: None,
         },
     )
     .unwrap();
@@ -100,6 +103,7 @@ fn save_overwrites_existing() {
         &AppState {
             schema_version: 1,
             last_folder: Some(PathBuf::from("/new")),
+            last_pin: None,
         },
     )
     .unwrap();
