@@ -28,7 +28,12 @@ pub fn run() {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
             let tiles = pfp_tiles::TileCache::new(cache_root, http);
-            let state = app_state::TauriAppState::with_tiles(tiles);
+            // Plan 04-03 Task 1 GREEN: with_tiles widened to accept
+            // initial_last_pin. Task 2 will wire pfp_state::load() to
+            // extract the real boot-loaded pin; until then pass None
+            // so the lib compiles. (Two-task split: signature change
+            // lands first, .setup wiring lands second.)
+            let state = app_state::TauriAppState::with_tiles(tiles, None);
             app.manage(state);
             Ok(())
         })

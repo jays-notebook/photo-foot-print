@@ -32,10 +32,12 @@ pub struct TauriAppState {
     /// happens via pfp_state::save (atomic) on every mutation.
     pub app_state: Mutex<pfp_state::AppState>,
 
-    /// Phase 3 (D-28): last successfully-saved coordinates within this app
-    /// session. Re-set on every successful save_geotag. None on app start;
-    /// destroyed on app exit. Phase 4 will move this to pfp-state for
-    /// cross-launch persistence.
+    /// Phase 3 (D-28) + Phase 4 (D-46): last successfully-saved
+    /// coordinates within and across app sessions. Seeded at boot
+    /// from `pfp_state::load().last_pin` via `lib.rs::.setup`. Updated
+    /// on every successful `save_geotag` as a write-through —
+    /// `state.json` (durable) AND this Mutex (in-memory hot mirror)
+    /// both updated. Field name preserved (D-46 deferred rename).
     pub session_last_pin: Mutex<Option<(f64, f64)>>,
 
     /// Phase 3 (D-30): shared tile cache + reqwest fetcher. Constructed once
@@ -52,8 +54,14 @@ pub struct TauriAppState {
 impl TauriAppState {
     /// Production constructor — used by `lib.rs::run`'s `.setup` hook.
     /// Takes the externally-resolved `TileCache` (constructed against
-    /// the real `app_cache_dir()`).
-    pub fn with_tiles(tiles: pfp_tiles::TileCache) -> Self {
+    /// the real `app_cache_dir()`) and the boot-loaded `last_pin` from
+    /// `pfp_state::load()` (Phase 4 D-46). Pass `None` when no prior
+    /// pin is on disk, or when `pfp_state::load` failed and the caller
+    /// fell back to `AppState::default()`.
+    pub fn with_tiles(
+        tiles: pfp_tiles::TileCache,
+        initial_last_pin: Option<(f64, f64)>,
+    ) -> Self {
         let permits = std::thread::available_parallelism()
             .map(|n| n.get().min(4))
             .unwrap_or(4);
@@ -63,7 +71,7 @@ impl TauriAppState {
             in_flight: Mutex::new(HashSet::new()),
             thumb_semaphore: Arc::new(Semaphore::new(permits)),
             app_state: Mutex::new(app_state),
-            session_last_pin: Mutex::new(None),
+            session_last_pin: Mutex::new(initial_last_pin),
             tiles,
             tile_fetch_semaphore: Arc::new(Semaphore::new(4)),
         }
@@ -84,6 +92,9 @@ impl Default for TauriAppState {
             std::env::temp_dir().join("pfp-tiles-test-cache"),
             pfp_tiles::build_osm_client().expect("build_osm_client (test default)"),
         );
-        Self::with_tiles(tiles)
+        // Test-only: hermetic — never depends on whatever state.json
+        // happens to exist on the dev machine (see PATTERNS.md note
+        // "do not wire pfp_state::load() into the test path").
+        Self::with_tiles(tiles, None)
     }
 }
