@@ -62,4 +62,50 @@ mod tests {
         assert!(validate_dto_format("2024.01.15 14:30:00").is_err());
         assert!(validate_dto_format("2024:01:15\t14:30:00").is_err());
     }
+
+    /// Phase 4 D-57 / Pitfall 13: `set_capture_time` writes BOTH
+    /// DateTimeOriginal (0x9003) AND DateTimeDigitized (0x9004 -- exposed by
+    /// `little_exif 0.6.23` under the alias name `CreateDate`; same TIFF tag
+    /// id, same wire format, same EXIF semantics). Catches a regression where
+    /// the renamed helper drops the companion-write.
+    #[test]
+    fn set_capture_time_writes_both_dto_and_dt_digitized() {
+        let mut metadata = little_exif::metadata::Metadata::new();
+        super::set_capture_time(&mut metadata, "2024:01:15 14:30:00")
+            .expect("valid format");
+
+        let expected = "2024:01:15 14:30:00".to_string();
+        let mut found_original = false;
+        let mut found_digitized = false;
+        for tag in &metadata {
+            if let little_exif::exif_tag::ExifTag::DateTimeOriginal(s) = tag {
+                assert_eq!(s, &expected);
+                found_original = true;
+            }
+            if let little_exif::exif_tag::ExifTag::CreateDate(s) = tag {
+                assert_eq!(s, &expected);
+                found_digitized = true;
+            }
+        }
+        assert!(found_original, "DateTimeOriginal must be set");
+        assert!(
+            found_digitized,
+            "DateTimeDigitized (CreateDate, EXIF tag 0x9004) must be set (Pitfall 13)"
+        );
+    }
+
+    /// Phase 4 D-57: validator gate is intact post-rename. Invalid format
+    /// must still return `ExifError::InvalidDateTime`.
+    #[test]
+    fn set_capture_time_rejects_invalid_format() {
+        let mut metadata = little_exif::metadata::Metadata::new();
+        let err = super::set_capture_time(&mut metadata, "2024-01-15T14:30:00")
+            .expect_err("ISO format must be rejected");
+        match err {
+            crate::error::ExifError::InvalidDateTime(s) => {
+                assert_eq!(s, "2024-01-15T14:30:00");
+            }
+            other => panic!("expected InvalidDateTime, got: {other:?}"),
+        }
+    }
 }
