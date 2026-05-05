@@ -162,4 +162,58 @@ mod tests {
         let _ = StateError::NoParent;
         let _ = StateError::Parse("x".to_string());
     }
+
+    /// Phase 4 (D-44 forward-compat): a `state.json` produced by Phase 3
+    /// (no `last_pin` field) must continue to load -- the missing field
+    /// surfaces as `None` via `#[serde(default)]`. Pinning this as a unit
+    /// test catches accidental `schema_version` bumps and rename
+    /// regressions.
+    #[test]
+    fn phase3_shape_state_json_loads_with_last_pin_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":1,"last_folder":"/tmp/photos"}"#,
+        )
+        .expect("write fixture");
+
+        let state = crate::load_from(&path).expect("load_from succeeds");
+        assert_eq!(state.schema_version, 1);
+        assert!(state.last_folder.is_some());
+        assert!(
+            state.last_pin.is_none(),
+            "missing last_pin must default to None"
+        );
+    }
+
+    /// Phase 4 (D-44): `AppState::default()` yields `last_pin: None` --
+    /// the field is additive, never required.
+    #[test]
+    fn default_app_state_has_no_last_pin() {
+        let s = AppState::default();
+        assert!(s.last_pin.is_none());
+    }
+
+    /// Phase 4 (D-44 / D-45): round-trip a state with a `last_pin` value
+    /// through the atomic-write seams. Catches serde rename regressions
+    /// and asserts the persisted JSON shape stays additive-compatible.
+    /// Note: uses `save_to` / `load_from` (test seams) so the test does
+    /// not touch the user's real `data_local_dir()`.
+    #[test]
+    fn save_to_then_load_from_round_trips_last_pin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("state.json");
+
+        let mut state = AppState::default();
+        state.last_pin = Some((35.6586, 139.7454));
+        crate::save_to(&path, &state).expect("save_to succeeds");
+
+        let loaded = crate::load_from(&path).expect("load_from succeeds");
+        assert_eq!(loaded.last_pin, Some((35.6586, 139.7454)));
+        assert_eq!(
+            loaded.schema_version, 1,
+            "schema_version must stay 1 after additive change"
+        );
+    }
 }
