@@ -28,12 +28,24 @@ pub fn run() {
                 Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
             })?;
             let tiles = pfp_tiles::TileCache::new(cache_root, http);
-            // Plan 04-03 Task 1 GREEN: with_tiles widened to accept
-            // initial_last_pin. Task 2 will wire pfp_state::load() to
-            // extract the real boot-loaded pin; until then pass None
-            // so the lib compiles. (Two-task split: signature change
-            // lands first, .setup wiring lands second.)
-            let state = app_state::TauriAppState::with_tiles(tiles, None);
+
+            // Phase 4 (D-46): boot-load last_pin from state.json so the
+            // session_last_pin Mutex is seeded BEFORE the first
+            // get_session_last_pin IPC fires from the frontend.
+            //
+            // D-47 / Discretion (boot-load failure handling): a corrupt or
+            // future-schema state.json must NOT block startup. Log the error
+            // and fall back to AppState::default() — the user sees the
+            // SEOUL_DEFAULT center on first photo selection (D-26 chain
+            // unchanged) and the next successful save_geotag rewrites a
+            // valid state.json over the broken one.
+            let initial_state = pfp_state::load().unwrap_or_else(|e| {
+                eprintln!("pfp_state::load failed at boot: {e}");
+                pfp_state::AppState::default()
+            });
+            let initial_last_pin = initial_state.last_pin;
+
+            let state = app_state::TauriAppState::with_tiles(tiles, initial_last_pin);
             app.manage(state);
             Ok(())
         })
