@@ -1,4 +1,5 @@
-//! DateTimeOriginal write + strict format validation.
+//! Capture-time write (DateTimeOriginal + DateTimeDigitized companion) +
+//! strict format validation.
 //!
 //! EXIF 2.31 spec format: `YYYY:MM:DD HH:MM:SS` (length 19, colons at byte
 //! offsets 4, 7, 13, 16; space at offset 10; everything else ASCII digits).
@@ -7,11 +8,30 @@ use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 
 use crate::error::ExifError;
 
-/// Set DateTimeOriginal on the given metadata. Creates the tag if absent --
-/// `little_exif::Metadata::set_tag` "automatically determines appropriate IFD placement".
-pub(crate) fn set_datetime_original(metadata: &mut Metadata, dto: &str) -> Result<(), ExifError> {
+/// Set DateTimeOriginal AND DateTimeDigitized to the same 19-char value
+/// (Phase 4 D-57 / Pitfall 13: writing only DateTimeOriginal leaves the
+/// "digitized" timestamp stale, which Adobe Bridge keys off). Both tags
+/// are mutated on the same `Metadata` instance before the surgical APP1
+/// rewrite in `write_gps`, so the atomic-write contract persists either
+/// both tags or neither.
+///
+/// Note on the tag identifier: in the EXIF 2.31 spec the 0x9004 tag is named
+/// `DateTimeDigitized`. `little_exif 0.6.23` exposes that same TIFF tag under
+/// the variant alias `ExifTag::CreateDate` (same id, same `STRING` format,
+/// same 20-byte length). exiftool also recognizes both names for the same
+/// underlying tag. The single `metadata.set_tag(ExifTag::CreateDate(...))`
+/// call below writes EXIF 0x9004, which is what Pitfall 13 / D-57 require.
+///
+/// Visibility stays `pub(crate)` -- the only call site is `crate::write_gps`.
+/// SubSec / OffsetTime tags are NOT touched in v1 (D-57: "preserve
+/// whatever was on the file"). Renamed in Phase 4 from a single-tag helper
+/// to reflect the widened scope (capture time = original + digitized).
+pub(crate) fn set_capture_time(metadata: &mut Metadata, dto: &str) -> Result<(), ExifError> {
     validate_dto_format(dto)?;
     metadata.set_tag(ExifTag::DateTimeOriginal(dto.to_string()));
+    // EXIF 0x9004 -- spec name: DateTimeDigitized. little_exif's variant alias
+    // for the same tag id is `CreateDate`.
+    metadata.set_tag(ExifTag::CreateDate(dto.to_string()));
     Ok(())
 }
 
