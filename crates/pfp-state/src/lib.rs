@@ -12,9 +12,10 @@
 //!     path is reserved for pfp-exif::atomic in-place EXIF writes -- see
 //!     Phase 1 atomic.rs).
 //!   - Forward compatibility: schema_version defaults to 1 via serde
-//!     `default = "schema_version_default"`. Phase 4 will add last_pin and
-//!     capture_time_default fields; reading an old (Phase 2) state.json
-//!     still works because Option fields default to None.
+//!     `default = "schema_version_default"`. Phase 4 added `last_pin:
+//!     Option<(f64, f64)>`; reading a Phase 2 / Phase 3 state.json still
+//!     works because Option fields default to None and `schema_version`
+//!     stays at 1 (additive-only schema evolution).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -29,8 +30,9 @@ const STATE_FILE: &str = "state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppState {
-    /// Schema version for forward-compat. Phase 4 will bump to 2 when adding
-    /// last_pin: Option<(f64, f64)>.
+    /// Schema version for forward-compat. Phase 4 added `last_pin`
+    /// additively without bumping; future migrations will bump only when
+    /// a non-additive change lands.
     #[serde(default = "schema_version_default")]
     pub schema_version: u32,
 
@@ -38,6 +40,15 @@ pub struct AppState {
     /// or after the user has never opened a folder.
     #[serde(default)]
     pub last_folder: Option<PathBuf>,
+
+    /// Phase 4 (D-44 / D-46 / MAP-03): most recently saved pin (lat, lng).
+    /// None on first launch or before any successful `save_geotag`. Re-set
+    /// on every successful save; the Tauri host's `.setup` hook reads this
+    /// value at boot to seed `TauriAppState.session_last_pin` (Plan 04-03).
+    /// Additive: a Phase 2 / Phase 3 state.json (without this key) loads as
+    /// `None` because of `#[serde(default)]`.
+    #[serde(default)]
+    pub last_pin: Option<(f64, f64)>,
 }
 
 impl Default for AppState {
@@ -45,6 +56,7 @@ impl Default for AppState {
         Self {
             schema_version: schema_version_default(),
             last_folder: None,
+            last_pin: None,
         }
     }
 }
@@ -128,6 +140,17 @@ pub fn save_last_folder(folder: &Path) -> Result<(), StateError> {
     save(&state)
 }
 
+/// Convenience: load current state (or default), update `last_pin`, save.
+/// Phase 4 (D-45): the Tauri host's `save_geotag` IPC calls this from
+/// inside its `spawn_blocking` block after `pfp_exif::write_gps` succeeds.
+/// On Err, the IPC layer logs and swallows (D-47 -- best-effort
+/// persistence). This lib stays fail-loud and surfaces `StateError`.
+pub fn save_last_pin(lat: f64, lng: f64) -> Result<(), StateError> {
+    let mut state = load()?;
+    state.last_pin = Some((lat, lng));
+    save(&state)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{AppState, StateError};
@@ -161,5 +184,61 @@ mod tests {
         let _ = StateError::NoDataLocalDir;
         let _ = StateError::NoParent;
         let _ = StateError::Parse("x".to_string());
+    }
+
+    /// Phase 4 (D-44 forward-compat): a `state.json` produced by Phase 3
+    /// (no `last_pin` field) must continue to load -- the missing field
+    /// surfaces as `None` via `#[serde(default)]`. Pinning this as a unit
+    /// test catches accidental `schema_version` bumps and rename
+    /// regressions.
+    #[test]
+    fn phase3_shape_state_json_loads_with_last_pin_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("state.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":1,"last_folder":"/tmp/photos"}"#,
+        )
+        .expect("write fixture");
+
+        let state = crate::load_from(&path).expect("load_from succeeds");
+        assert_eq!(state.schema_version, 1);
+        assert!(state.last_folder.is_some());
+        assert!(
+            state.last_pin.is_none(),
+            "missing last_pin must default to None"
+        );
+    }
+
+    /// Phase 4 (D-44): `AppState::default()` yields `last_pin: None` --
+    /// the field is additive, never required.
+    #[test]
+    fn default_app_state_has_no_last_pin() {
+        let s = AppState::default();
+        assert!(s.last_pin.is_none());
+    }
+
+    /// Phase 4 (D-44 / D-45): round-trip a state with a `last_pin` value
+    /// through the atomic-write seams. Catches serde rename regressions
+    /// and asserts the persisted JSON shape stays additive-compatible.
+    /// Note: uses `save_to` / `load_from` (test seams) so the test does
+    /// not touch the user's real `data_local_dir()`.
+    #[test]
+    fn save_to_then_load_from_round_trips_last_pin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("state.json");
+
+        let state = AppState {
+            last_pin: Some((35.6586, 139.7454)),
+            ..AppState::default()
+        };
+        crate::save_to(&path, &state).expect("save_to succeeds");
+
+        let loaded = crate::load_from(&path).expect("load_from succeeds");
+        assert_eq!(loaded.last_pin, Some((35.6586, 139.7454)));
+        assert_eq!(
+            loaded.schema_version, 1,
+            "schema_version must stay 1 after additive change"
+        );
     }
 }
