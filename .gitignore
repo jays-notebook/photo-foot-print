@@ -33,3 +33,7 @@ CLAUDE.md
 
 # Phase 2 — folder-local thumbnail cache (D-17).
 **/.pfp-thumbs/
+
+# Personal-photo fixtures — supplied locally, never committed.
+# See docs/FIXTURES.md for how to source them.
+tests/fixtures/scanner/
