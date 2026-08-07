@@ -24,8 +24,10 @@ Thumbs.db
 .env
 .env.local
 
-# Claude Code (personal-scope settings)
-.claude/settings.local.json
+# Claude Code — managed centrally in the agent-settings repo;
+# CLAUDE.md and .claude are local symlinks into ../agent-settings/photo-foot-print/
+CLAUDE.md
+.claude
 **/audit-log.jsonl
 
 # Phase 2 — folder-local thumbnail cache (D-17).
