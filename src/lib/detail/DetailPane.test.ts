@@ -88,6 +88,21 @@ test("GPS-only save leaves capture and digitized timestamps untouched", async ()
   const view = render(DetailPane, { summary: summary("A") });
   await waitFor(() => expect((view.getByRole("button", {name: "Save"}) as HTMLButtonElement).disabled).toBe(false));
   await fireEvent.click(view.getByRole("button", {name: "Save"}));
-  await waitFor(() => expect(ipc.saveGeotag).toHaveBeenCalledWith("A", 37.5665, 126.978, null));
+  await waitFor(() => expect(ipc.saveGeotag).toHaveBeenCalledWith("A", 37.5665, 126.978, {kind: "keep"}));
   expect(dialog.confirmSaveGeotag).toHaveBeenCalledWith(expect.objectContaining({dirtyDto: false}));
+});
+
+
+test.each([
+  ["", {kind: "remove"}],
+  ["2001-02-03T04:05", {kind: "set", value: "2001:02:03 04:05:00"}],
+])("sends an explicit capture-time operation for %s", async (value, operation) => {
+  const saved = { ...meta("A"), gps: {lat: 37, lng: 127}, capture_time: "1990:01:01 00:00:00" };
+  vi.mocked(ipc.readPhotoMeta).mockResolvedValue(saved);
+  vi.mocked(ipc.saveGeotag).mockResolvedValue({...saved, capture_time: null});
+  const view = render(DetailPane, { summary: summary("A") });
+  await waitFor(() => expect(view.getByLabelText("Capture time")).toBeTruthy());
+  await fireEvent.input(view.getByLabelText("Capture time"), {target: {value}});
+  await fireEvent.click(view.getByRole("button", {name: "Save"}));
+  await waitFor(() => expect(ipc.saveGeotag).toHaveBeenCalledWith("A", 37, 127, operation));
 });

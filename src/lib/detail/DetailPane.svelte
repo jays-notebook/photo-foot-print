@@ -8,6 +8,7 @@
     type PhotoMeta,
     type PhotoSummary,
     type GpsCoord,
+    type CaptureTimeChange,
   } from "../ipc";
   import ExifReadout from "./ExifReadout.svelte";
   import MapPane from "../map/MapPane.svelte";
@@ -38,6 +39,7 @@
   // rapid A→B selection sequence cannot land A's pendingDto after B's
   // photo is already showing.
   let pendingDto: string | null = $state(null);
+  let dtoValid = $state(true);
   // Informational; live error rendering lives inside CoordsPasteRow.
   // Reserved for cross-component signaling per outline seed 7.
   let pasteError: string | null = $state(null);
@@ -49,6 +51,7 @@
   $effect(() => {
     const s = summary;
     ++selectionVersion;
+    dtoValid = true;
     meta = null;
     pendingDto = null;
     if (!s) {
@@ -110,7 +113,7 @@
   });
   let saveEnabled = $derived.by(() => {
     const current = meta;
-    return !loading && current?.id === summary?.id && (pinDirty || dtoDirty);
+    return !loading && dtoValid && current?.id === summary?.id && (pinDirty || dtoDirty);
   });
 
   // UI-SPEC §11.5: hint widening. Three deterministic strings + the
@@ -147,7 +150,9 @@
     const target = { id: summary.id, fileName: summary.file_name };
     const pin = { ...pendingPin };
     const dto = pendingDto;
-    const writeDto = dtoDirty ? dto : null;
+    const captureTime: CaptureTimeChange = !dtoDirty
+      ? { kind: "keep" }
+      : dto === null ? { kind: "remove" } : { kind: "set", value: dto };
     const version = selectionVersion;
     const dialog = {
       fileName: target.fileName,
@@ -164,7 +169,7 @@
     try {
       if (!(await confirmSaveGeotag(dialog))) return;
       if (version !== selectionVersion || summary?.id !== target.id) return;
-      const fresh = await saveGeotag(target.id, pin.lat, pin.lng, writeDto);
+      const fresh = await saveGeotag(target.id, pin.lat, pin.lng, captureTime);
       // A completed save still updates its list row, but never another editor.
       if (version === selectionVersion && summary?.id === target.id) {
         meta = fresh;
@@ -205,7 +210,7 @@
     <ExifReadout {meta} />
     <fieldset disabled={saving}>
       <CoordsPasteRow onApply={onPasteApply} />
-      <DateTimeEditor value={pendingDto} onChange={onDtoChange} />
+      <DateTimeEditor value={pendingDto} onChange={onDtoChange} onValidityChange={(valid) => (dtoValid = valid)} />
     </fieldset>
     {#if pasteError}
       <!-- Reserved cross-component signal slot per outline seed 7. -->

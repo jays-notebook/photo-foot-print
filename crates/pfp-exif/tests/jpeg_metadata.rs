@@ -81,3 +81,63 @@ fn corrupt_exif_and_truncated_jpegs_fail_without_changing_original() {
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 }
+
+#[test]
+fn capture_time_keep_set_and_remove_round_trip() {
+    use pfp_exif::{write_metadata, CaptureTimeChange};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("photo.jpg");
+    std::fs::write(&path, jpeg()).unwrap();
+    let mut original = Metadata::new();
+    original.set_tag(ExifTag::DateTimeOriginal("1990:01:01 00:00:00".into()));
+    original.set_tag(ExifTag::CreateDate("2026:01:01 00:00:00".into()));
+    original.set_tag(ExifTag::Artist("Preserved artist".into()));
+    original.write_to_file(&path).unwrap();
+    write_metadata(&path, 37.0, 127.0, None, CaptureTimeChange::Keep).unwrap();
+    let kept = Metadata::new_from_path(&path).unwrap();
+    assert!(
+        matches!(kept.get_tag(&ExifTag::CreateDate(String::new())).next(), Some(ExifTag::CreateDate(s)) if s == "2026:01:01 00:00:00")
+    );
+    let date = "2001:02:03 04:05:00";
+    write_metadata(
+        &path,
+        37.0,
+        127.0,
+        None,
+        CaptureTimeChange::Set(date.into()),
+    )
+    .unwrap();
+    assert_eq!(
+        pfp_exif::read_detail(&path)
+            .unwrap()
+            .capture_time
+            .as_deref(),
+        Some(date)
+    );
+    let set = Metadata::new_from_path(&path).unwrap();
+    assert!(
+        matches!(set.get_tag(&ExifTag::CreateDate(String::new())).next(), Some(ExifTag::CreateDate(s)) if s == date)
+    );
+    let before_invalid = std::fs::read(&path).unwrap();
+    assert!(write_metadata(
+        &path,
+        37.0,
+        127.0,
+        None,
+        CaptureTimeChange::Set("invalid".into())
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before_invalid);
+    write_metadata(&path, 37.0, 127.0, None, CaptureTimeChange::Remove).unwrap();
+    let detail = pfp_exif::read_detail(&path).unwrap();
+    assert_eq!(detail.capture_time, None);
+    assert_eq!(detail.gps, Some((37.0, 127.0)));
+    let removed = Metadata::new_from_path(&path).unwrap();
+    assert!(removed
+        .get_tag(&ExifTag::CreateDate(String::new()))
+        .next()
+        .is_none());
+    assert!(
+        matches!(removed.get_tag(&ExifTag::Artist(String::new())).next(), Some(ExifTag::Artist(s)) if s == "Preserved artist")
+    );
+}

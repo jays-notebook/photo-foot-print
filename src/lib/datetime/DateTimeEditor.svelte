@@ -11,8 +11,9 @@
     value: string | null;
     /** Emits EXIF wire format or null on every input event. */
     onChange: (next: string | null) => void;
+    onValidityChange?: (valid: boolean) => void;
   }
-  let { value, onChange }: Props = $props();
+  let { value, onChange, onValidityChange }: Props = $props();
 
   // Reactive HTML value — re-derives when parent's `value` prop changes
   // (photo switch). Pattern source: ExifReadout.svelte $derived for
@@ -21,9 +22,11 @@
 
   function onInput(e: Event): void {
     const target = e.currentTarget as HTMLInputElement;
-    // toExif returns null for empty / partial / malformed input
-    // (UI-SPEC §7.3). Parent stores null until the strict 16-char shape lands.
-    onChange(toExif(target.value));
+    // Browsers also expose partial date edits as an empty value. Only a
+    // valid empty input means deletion; an incomplete edit blocks saving.
+    const valid = target.validity.valid;
+    onValidityChange?.(valid);
+    if (valid) onChange(toExif(target.value));
   }
 </script>
 
