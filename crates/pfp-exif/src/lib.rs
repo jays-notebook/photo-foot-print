@@ -23,6 +23,7 @@ pub mod atomic;
 pub mod detail;
 pub mod error;
 mod gps;
+mod jpeg_metadata;
 pub mod summary;
 mod time;
 
@@ -34,7 +35,7 @@ pub use crate::summary::{
 
 use std::path::Path;
 
-use little_exif::{exif_tag::ExifTag, metadata::Metadata, rational::uR64};
+use little_exif::{exif_tag::ExifTag, rational::uR64};
 
 use crate::gps::signed_deg_to_rational_with_ref;
 use crate::time::set_capture_time;
@@ -58,7 +59,7 @@ pub fn write_gps(
     crate::atomic::write_via_temp(target, |tmp_path| {
         // Load metadata from the SAME tmp_path the atomic helper just populated
         // (by copying the original).
-        let mut metadata = Metadata::new_from_path(tmp_path).map_err(|e| {
+        let mut metadata = crate::jpeg_metadata::read(tmp_path).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("little_exif read: {e}"),
