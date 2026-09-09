@@ -37,3 +37,9 @@ CLAUDE.md
 # Personal-photo fixtures — supplied locally, never committed.
 # See docs/FIXTURES.md for how to source them.
 tests/fixtures/scanner/
+
+# Agent artifacts managed in the sibling agent-settings repository
+/AGENTS.md
+/AGENTS.override.md
+/.codex
+/.agents
