@@ -26,49 +26,11 @@
 //!
 //!   - tests/fixtures/scanner/*.jpg  (at least one representative file)
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
-fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures")
-        .join("scanner")
-}
-
-fn discover_fixtures() -> Vec<PathBuf> {
-    let dir = fixtures_dir();
-    let mut out = Vec::new();
-    let read = match std::fs::read_dir(&dir) {
-        Ok(r) => r,
-        Err(_) => return out,
-    };
-    for entry in read.flatten() {
-        let p = entry.path();
-        let is_jpg = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"))
-            .unwrap_or(false);
-        if !is_jpg {
-            continue;
-        }
-        // Skip LFS pointer files / truncated artifacts; real scanner JPEGs are MB-scale.
-        let len = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-        if len <= 1024 {
-            eprintln!(
-                "[scanner] skipping {:?} (size {} bytes -- likely an LFS pointer; run `git lfs pull`)",
-                p, len,
-            );
-            continue;
-        }
-        out.push(p);
-    }
-    out.sort();
-    out
-}
+mod common;
+use common::scanner_fixtures as discover_fixtures;
 
 fn exiftool_g1(path: &Path) -> String {
     let out = Command::new("exiftool")
@@ -97,7 +59,6 @@ fn exiftool_g1(path: &Path) -> String {
 fn strip_expected_diffs(s: &str) -> String {
     s.lines()
         .filter(|l| !l.starts_with("[GPS]"))
-        .filter(|l| !(l.starts_with("[ExifIFD]") && l.contains("DateTimeOriginal")))
         .filter(|l| !(l.starts_with("[IFD0]") && l.contains("ModifyDate")))
         .filter(|l| !(l.starts_with("[ExifIFD]") && l.contains("ModifyDate")))
         .filter(|l| !l.starts_with("[File]"))
@@ -211,5 +172,59 @@ fn little_exif_issue_93_no_op_round_trip() {
         metadata
             .write_to_file(&work)
             .unwrap_or_else(|e| panic!("[{label}] little_exif write failed (issue #93?): {e}"));
+    }
+}
+
+#[test]
+#[ignore = "requires local scanner fixtures and ExifTool; run make test-gate"]
+fn capture_time_edits_preserve_unrelated_metadata_and_image_bytes() {
+    use pfp_exif::{write_metadata, CaptureTimeChange};
+    fn without_capture_time(text: &str) -> String {
+        strip_expected_diffs(text)
+            .lines()
+            .filter(|line| {
+                !(line.starts_with("[ExifIFD]")
+                    && (line.contains("DateTimeOriginal") || line.contains("CreateDate")))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    for path in discover_fixtures() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("photo.jpg");
+        std::fs::copy(path, &work).unwrap();
+        let before = without_capture_time(&exiftool_g1(&work));
+        let image = read_image_data(&work);
+        for change in [
+            CaptureTimeChange::Set("1990:01:02 03:04:05".into()),
+            CaptureTimeChange::Remove,
+        ] {
+            write_metadata(&work, 37.0, 127.0, None, change).unwrap();
+            assert_eq!(without_capture_time(&exiftool_g1(&work)), before);
+            assert_eq!(read_image_data(&work), image);
+        }
+        assert!(pfp_exif::read_detail(&work).unwrap().capture_time.is_none());
+    }
+}
+
+#[test]
+#[ignore = "requires local scanner fixtures and ExifTool; run make test-gate"]
+fn scanner_without_exif_preserves_xmp_and_compressed_image() {
+    for path in discover_fixtures() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("photo.jpg");
+        std::fs::copy(path, &work).unwrap();
+        let output = Command::new("exiftool")
+            .args(["-exif:all=", "-overwrite_original"])
+            .arg(&work)
+            .output()
+            .expect("ExifTool required");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(pfp_exif::read_detail(&work).unwrap().gps.is_none());
+        check_one(&work);
     }
 }

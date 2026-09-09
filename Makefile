@@ -21,7 +21,7 @@ test-gate:
 	#   - tests/fixtures/scanner/*.jpg supplied (see docs/FIXTURES.md)
 	#   - exiftool on PATH (`brew install exiftool`)
 	# A green run satisfies ROADMAP.md Phase 1 success criterion #3.
-	cargo test -p pfp-exif --test metadata_preservation -- --include-ignored
+	cargo test -p pfp-exif --test metadata_preservation --test round_trip --test strict_4_predicate -- --include-ignored
 
 test-fault:
 	# Plan 03's fault-injection durability test (Phase 1 criterion #4).

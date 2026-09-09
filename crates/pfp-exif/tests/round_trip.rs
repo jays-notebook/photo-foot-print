@@ -1,30 +1,10 @@
 //! Phase 1 success criterion #5: round-trip GPS reads back what we wrote, in all
 //! four hemispheres, within +/- 1e-6 degrees.
 //!
-//! Uses one of the user-supplied DSLR fixtures as the source JPEG. If no fixture
-//! is supplied yet, tests gracefully no-op (so `cargo test` is green on a fresh
-//! clone). The unit tests in gps.rs / time.rs always run regardless.
+//! Uses local scanner JPEGs. Run explicitly with `make test-gate`.
+//! Missing fixtures fail the gate instead of silently passing.
 
-use std::path::PathBuf;
-
-fn fixtures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures")
-}
-
-/// Returns the first available real fixture JPEG (size > 1 KB to skip LFS pointers).
-fn first_available_fixture() -> Option<PathBuf> {
-    for vendor in ["sony", "canon", "nikon"] {
-        let p = fixtures_root().join(vendor).join("sample.jpg");
-        if p.exists() && std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) > 1024 {
-            return Some(p);
-        }
-    }
-    None
-}
+mod common;
 
 fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
     (a - b).abs() < eps
@@ -77,10 +57,7 @@ fn read_back_gps(p: &std::path::Path) -> (f64, f64, char, char) {
 }
 
 fn round_trip_at(name: &str, lat: f64, lng: f64, expected_lat_ref: char, expected_lng_ref: char) {
-    let Some(src) = first_available_fixture() else {
-        eprintln!("[{name}] No fixture JPEG supplied yet -- see docs/FIXTURES.md. Skipping.");
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &work).unwrap();
@@ -88,8 +65,16 @@ fn round_trip_at(name: &str, lat: f64, lng: f64, expected_lat_ref: char, expecte
     pfp_exif::write_gps(&work, lat, lng, None, None).expect("write_gps");
 
     let (read_lat, read_lng, read_lat_ref, read_lng_ref) = read_back_gps(&work);
-    let signed_lat = if read_lat_ref == 'S' { -read_lat } else { read_lat };
-    let signed_lng = if read_lng_ref == 'W' { -read_lng } else { read_lng };
+    let signed_lat = if read_lat_ref == 'S' {
+        -read_lat
+    } else {
+        read_lat
+    };
+    let signed_lng = if read_lng_ref == 'W' {
+        -read_lng
+    } else {
+        read_lng
+    };
 
     assert!(
         approx_eq(signed_lat, lat, 1e-6),
@@ -104,30 +89,33 @@ fn round_trip_at(name: &str, lat: f64, lng: f64, expected_lat_ref: char, expecte
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_tokyo() {
     round_trip_at("tokyo", 35.6586, 139.7454, 'N', 'E');
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_sydney() {
     round_trip_at("sydney", -33.8688, 151.2093, 'S', 'E');
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_buenos_aires() {
     round_trip_at("buenos_aires", -34.6037, -58.3816, 'S', 'W');
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_new_york() {
     round_trip_at("new_york", 40.7128, -74.0060, 'N', 'W');
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_with_altitude_above_sea_level() {
-    let Some(src) = first_available_fixture() else {
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &work).unwrap();
@@ -137,10 +125,9 @@ fn round_trip_with_altitude_above_sea_level() {
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn round_trip_with_altitude_below_sea_level() {
-    let Some(src) = first_available_fixture() else {
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &work).unwrap();
@@ -150,10 +137,9 @@ fn round_trip_with_altitude_below_sea_level() {
 }
 
 #[test]
+#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn datetime_original_written_or_created() {
-    let Some(src) = first_available_fixture() else {
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &work).unwrap();
