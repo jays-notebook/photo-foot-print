@@ -23,9 +23,8 @@ pub struct PhotoDetail {
 }
 
 pub fn read_detail(target: &Path) -> Result<PhotoDetail, ExifError> {
-    let metadata = Metadata::new_from_path(target).map_err(|e| {
-        ExifError::LittleExif(format!("read {}: {}", target.display(), e))
-    })?;
+    let metadata = crate::jpeg_metadata::read(target)
+        .map_err(|e| ExifError::LittleExif(format!("read {}: {}", target.display(), e)))?;
 
     let gps = crate::summary::gps_signed_decimal(&metadata);
     let altitude_m = read_altitude(&metadata);

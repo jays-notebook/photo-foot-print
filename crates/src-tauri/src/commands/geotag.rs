@@ -28,32 +28,16 @@ fn resolve_id(state: &TauriAppState, id: &str) -> Result<PathBuf, WireError> {
     })
 }
 
-/// D-40 / D-58: GPS + capture-time save. Phase 4 widens this to accept
-/// `dto: Option<String>` so the frontend's `<input type="datetime-local">`
-/// can route through the same single-atomic-write `pfp_exif::write_gps`
-/// call. The lib already accepts `dto: Option<&str>` (Plan 04-02 extends
-/// it to write `DateTimeDigitized` alongside `DateTimeOriginal`).
-///
-/// D-43: path canonicalization happens inside the handler. The frontend
-/// sees only the path-hash `id`, never a writable path string.
-///
-/// Atomic-write contract (Phase 1 D-07): on any failure, the original
-/// JPEG is unchanged. The error surfaces as `WireError::ExifWrite`; the
-/// frontend shows it via plugin-dialog `message({kind: 'error'})`.
-///
-/// D-45 / D-47 last_pin write-through: on a successful
-/// `pfp_exif::write_gps`, persist `(lat, lng)` to `state.json`
-/// via `pfp_state::save_last_pin` BEFORE `read_detail`. State-save
-/// failure is logged via `eprintln!` and swallowed — the
-/// irreversible commit (the photo) already succeeded; `state.json`
-/// is regenerable.
+/// Save GPS with an explicit keep/set/remove capture-time operation.
+/// Photo I/O runs on a blocking thread. Last-pin persistence is best-effort
+/// after the atomic photo commit; failures there do not turn a save into an error.
 #[tauri::command]
 pub async fn save_geotag(
     state: State<'_, TauriAppState>,
     id: String,
     lat: f64,
     lng: f64,
-    dto: Option<String>,
+    capture_time: pfp_exif::CaptureTimeChange,
 ) -> Result<PhotoMeta, WireError> {
     let path = resolve_id(&state, &id)?;
 
@@ -65,25 +49,13 @@ pub async fn save_geotag(
     // discipline already established in commands/thumbnail.rs:100 and
     // hand the blocking work to a dedicated thread via spawn_blocking.
     //
-    // D-40 / D-58: GPS + optional capture-time. Altitude is still None
-    // (no v1 UI). The dto Option<String> is cloned into the move closure
-    // (cheap; up to 19 bytes) and threaded through as Option<&str>.
-    // Explicit `.map_err` to ExifWrite for the write step (NOT the
-    // From<ExifError> impl which would map to Exif — that lane is
-    // reserved for read failures).
     let path_for_blocking = path.clone();
-    let dto_for_blocking = dto.clone();
     let detail = tokio::task::spawn_blocking(move || {
-        pfp_exif::write_gps(
-            &path_for_blocking,
-            lat,
-            lng,
-            None,
-            dto_for_blocking.as_deref(),
-        )
-        .map_err(|e| WireError::ExifWrite {
-            detail: e.to_string(),
-        })?;
+        pfp_exif::write_metadata(&path_for_blocking, lat, lng, None, capture_time).map_err(
+            |e| WireError::ExifWrite {
+                detail: e.to_string(),
+            },
+        )?;
 
         // D-45 / D-47: persist last_pin AFTER the EXIF write succeeds,
         // BEFORE re-reading metadata. Failure is logged + swallowed —

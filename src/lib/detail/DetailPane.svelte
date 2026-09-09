@@ -8,6 +8,7 @@
     type PhotoMeta,
     type PhotoSummary,
     type GpsCoord,
+    type CaptureTimeChange,
   } from "../ipc";
   import ExifReadout from "./ExifReadout.svelte";
   import MapPane from "../map/MapPane.svelte";
@@ -38,16 +39,23 @@
   // rapid A→B selection sequence cannot land A's pendingDto after B's
   // photo is already showing.
   let pendingDto: string | null = $state(null);
+  let dtoValid = $state(true);
   // Informational; live error rendering lives inside CoordsPasteRow.
   // Reserved for cross-component signaling per outline seed 7.
   let pasteError: string | null = $state(null);
 
   let initialCenter: GpsCoord = $state(SEOUL_DEFAULT);
   let saving = $state(false);
+  let selectionVersion = 0;
 
   $effect(() => {
     const s = summary;
+    ++selectionVersion;
+    dtoValid = true;
+    meta = null;
+    pendingDto = null;
     if (!s) {
+      loading = false;
       meta = null;
       pendingPin = null;
       pendingDto = null;
@@ -103,7 +111,10 @@
     const m = meta;
     return pendingDto !== (m ? m.capture_time : null);
   });
-  let saveEnabled = $derived(pinDirty || dtoDirty);
+  let saveEnabled = $derived.by(() => {
+    const current = meta;
+    return !loading && dtoValid && current?.id === summary?.id && (pinDirty || dtoDirty);
+  });
 
   // UI-SPEC §11.5: hint widening. Three deterministic strings + the
   // Phase 3 fallback when meta is not yet loaded. Hidden entirely when
@@ -120,52 +131,55 @@
   });
 
   function onPinChange(lat: number, lng: number) {
-    pendingPin = { lat, lng };
+    if (!saving && !loading) pendingPin = { lat, lng };
   }
 
   function onPasteApply(lat: number, lng: number) {
     // UI-SPEC §11.2: paste-applied coords flow into pendingPin; the
     // pendingPin prop on MapPane drives a marker.setLatLng + map.setView.
-    pendingPin = { lat, lng };
+    if (!saving && !loading) pendingPin = { lat, lng };
   }
 
   function onDtoChange(next: string | null) {
-    pendingDto = next;
+    if (!saving && !loading) pendingDto = next;
   }
 
   async function onSave() {
-    if (!meta || !pendingPin || !summary) return;
-    const confirmed = await confirmSaveGeotag({
-      fileName: summary.file_name,
-      newLat: pendingPin.lat,
-      newLng: pendingPin.lng,
+    if (!saveEnabled || saving || !meta || !pendingPin || !summary) return;
+    // Freeze the target and values before the native dialog yields control.
+    const target = { id: summary.id, fileName: summary.file_name };
+    const pin = { ...pendingPin };
+    const dto = pendingDto;
+    const captureTime: CaptureTimeChange = !dtoDirty
+      ? { kind: "keep" }
+      : dto === null ? { kind: "remove" } : { kind: "set", value: dto };
+    const version = selectionVersion;
+    const dialog = {
+      fileName: target.fileName,
+      newLat: pin.lat,
+      newLng: pin.lng,
       oldLat: meta.gps?.lat ?? null,
       oldLng: meta.gps?.lng ?? null,
-      newDto: pendingDto,
+      newDto: dto,
       oldDto: meta.capture_time,
       dirtyCoords: pinDirty,
       dirtyDto: dtoDirty,
-    });
-    if (!confirmed) return;
+    };
     saving = true;
     try {
-      // Phase 4 (D-58): widened IPC carries pendingDto end-to-end.
-      // eslint-disable-next-line prettier/prettier -- single-line for plan literal-grep
-      const fresh = await saveGeotag(summary.id, pendingPin.lat, pendingPin.lng, pendingDto);
-      meta = fresh;
-      if (fresh.gps) {
-        pendingPin = { lat: fresh.gps.lat, lng: fresh.gps.lng };
+      if (!(await confirmSaveGeotag(dialog))) return;
+      if (version !== selectionVersion || summary?.id !== target.id) return;
+      const fresh = await saveGeotag(target.id, pin.lat, pin.lng, captureTime);
+      // A completed save still updates its list row, but never another editor.
+      if (version === selectionVersion && summary?.id === target.id) {
+        meta = fresh;
+        if (fresh.gps) pendingPin = { ...fresh.gps };
+        pendingDto = fresh.capture_time;
       }
-      // Phase 4 (D-61): reset DTO mirror to the freshly-written value so
-      // SaveBar disables again after a successful save.
-      pendingDto = fresh.capture_time;
       onSaved?.(fresh);
     } catch (e) {
       const wire = asWireError(e);
-      await showSaveError(
-        summary.file_name,
-        wire?.detail ?? formatError(e),
-      );
+      await showSaveError(target.fileName, wire?.detail ?? formatError(e));
     } finally {
       saving = false;
     }
@@ -177,7 +191,7 @@
 {:else}
   <h1 class="filename">{summary.file_name}</h1>
 
-  <div class="map-slot">
+  <div class="map-slot" inert={saving || loading}>
     {#if pendingPin}
       <MapPane
         {initialCenter}
@@ -194,8 +208,10 @@
     <p class="error">{error}</p>
   {:else if meta}
     <ExifReadout {meta} />
-    <CoordsPasteRow onApply={onPasteApply} />
-    <DateTimeEditor value={pendingDto} onChange={onDtoChange} />
+    <fieldset disabled={saving}>
+      <CoordsPasteRow onApply={onPasteApply} />
+      <DateTimeEditor value={pendingDto} onChange={onDtoChange} onValidityChange={(valid) => (dtoValid = valid)} />
+    </fieldset>
     {#if pasteError}
       <!-- Reserved cross-component signal slot per outline seed 7. -->
       <p class="error">{pasteError}</p>
@@ -206,6 +222,12 @@
 {/if}
 
 <style>
+  fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
   :global(.detail-pane) {
     display: flex;
     flex-direction: column;

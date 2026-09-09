@@ -23,6 +23,7 @@ pub mod atomic;
 pub mod detail;
 pub mod error;
 mod gps;
+mod jpeg_metadata;
 pub mod summary;
 mod time;
 
@@ -34,10 +35,19 @@ pub use crate::summary::{
 
 use std::path::Path;
 
-use little_exif::{exif_tag::ExifTag, metadata::Metadata, rational::uR64};
+use little_exif::{exif_tag::ExifTag, rational::uR64};
 
 use crate::gps::signed_deg_to_rational_with_ref;
 use crate::time::set_capture_time;
+
+/// Explicit capture-time mutation; omitted changes must not rewrite digitized time.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum CaptureTimeChange {
+    Keep,
+    Set(String),
+    Remove,
+}
 
 /// Write GPS coordinates (and optionally altitude + DateTimeOriginal) to a JPEG.
 ///
@@ -50,7 +60,26 @@ pub fn write_gps(
     altitude_m: Option<f64>,
     dto: Option<&str>,
 ) -> Result<(), ExifError> {
-    if let Some(s) = dto {
+    write_metadata(
+        target,
+        lat,
+        lng,
+        altitude_m,
+        dto.map_or(CaptureTimeChange::Keep, |s| {
+            CaptureTimeChange::Set(s.to_owned())
+        }),
+    )
+}
+
+/// Atomically save GPS and an explicit capture-time change.
+pub fn write_metadata(
+    target: &Path,
+    lat: f64,
+    lng: f64,
+    altitude_m: Option<f64>,
+    capture_time: CaptureTimeChange,
+) -> Result<(), ExifError> {
+    if let CaptureTimeChange::Set(s) = &capture_time {
         // Validate up front -- fail before touching the file.
         crate::time::validate_dto_format(s)?;
     }
@@ -58,7 +87,7 @@ pub fn write_gps(
     crate::atomic::write_via_temp(target, |tmp_path| {
         // Load metadata from the SAME tmp_path the atomic helper just populated
         // (by copying the original).
-        let mut metadata = Metadata::new_from_path(tmp_path).map_err(|e| {
+        let mut metadata = crate::jpeg_metadata::read(tmp_path).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("little_exif read: {e}"),
@@ -87,18 +116,26 @@ pub fn write_gps(
                 nominator: (abs_alt * 1_000.0).round() as u32,
                 denominator: 1_000,
             }]));
-            metadata.set_tag(ExifTag::GPSAltitudeRef(vec![if alt >= 0.0 { 0u8 } else { 1u8 }]));
+            metadata.set_tag(ExifTag::GPSAltitudeRef(vec![if alt >= 0.0 {
+                0u8
+            } else {
+                1u8
+            }]));
         }
 
-        if let Some(dto_str) = dto {
-            set_capture_time(&mut metadata, dto_str).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-            })?;
+        match &capture_time {
+            CaptureTimeChange::Keep => {}
+            CaptureTimeChange::Set(value) => set_capture_time(&mut metadata, value)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+            CaptureTimeChange::Remove => {
+                metadata.remove_tag(ExifTag::DateTimeOriginal(String::new()));
+                metadata.remove_tag(ExifTag::CreateDate(String::new()));
+            }
         }
 
-        metadata.write_to_file(tmp_path).map_err(|e| {
-            std::io::Error::other(format!("little_exif write: {e}"))
-        })?;
+        metadata
+            .write_to_file(tmp_path)
+            .map_err(|e| std::io::Error::other(format!("little_exif write: {e}")))?;
 
         Ok(())
     })?;

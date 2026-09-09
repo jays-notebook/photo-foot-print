@@ -9,9 +9,7 @@
 //! or:
 //!     make test-fault
 //!
-//! Tests that drive `pfp_exif::write_gps` end-to-end need a real DSLR fixture; they
-//! are `#[ignore]`-gated and no-op gracefully when no fixture is available so
-//! `make test-fault` is green on a fresh clone. Tests that exercise
+//! JPEG tests require local scanner fixtures and fail explicitly if absent. Tests that exercise
 //! `pfp_exif::atomic::write_via_temp` directly run unconditionally because they do
 //! not require a JPEG parser.
 
@@ -34,22 +32,7 @@ fn fault_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Returns the first available real DSLR fixture, or None if no fixture has been
-/// supplied yet. We need a real JPEG so `little_exif::Metadata::new_from_path` succeeds.
-fn first_available_fixture() -> Option<std::path::PathBuf> {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures");
-    for vendor in ["sony", "canon", "nikon"] {
-        let p = root.join(vendor).join("sample.jpg");
-        if p.exists() && std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) > 1024 {
-            return Some(p);
-        }
-    }
-    None
-}
+mod common;
 
 /// Reset the fault flag in case a previous test panicked without clearing it.
 fn reset_fault_flag() {
@@ -60,10 +43,7 @@ fn reset_fault_flag() {
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn original_survives_panic_after_temp_write() {
     let _guard = fault_lock();
-    let Some(src) = first_available_fixture() else {
-        eprintln!("No fixture supplied -- see docs/FIXTURES.md. Skipping fault-injection test.");
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
 
     // Copy the fixture into a fresh temp dir so the test never mutates the fixture.
     let tmp = tempfile::tempdir().unwrap();
@@ -71,41 +51,35 @@ fn original_survives_panic_after_temp_write() {
     let pristine = std::fs::read(&src).unwrap();
     std::fs::write(&target, &pristine).unwrap();
 
-    reset_fault_flag();
-    PANIC_AFTER_TEMP_WRITE.store(1, Ordering::SeqCst);
-    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        // write_gps calls atomic::write_via_temp internally, which calls
-        // fault_inject::maybe_panic_after_temp_write between fsync-temp and rename.
-        let _ = pfp_exif::write_gps(&target, 35.6586, 139.7454, None, None);
-    }))
-    .is_err();
-    reset_fault_flag();
-
-    assert!(panicked, "fault-injection should have panicked the writer");
-
-    // The target file MUST be byte-identical to the pristine fixture.
-    let after = std::fs::read(&target).unwrap();
-    assert_eq!(
-        after.len(),
-        pristine.len(),
-        "size mismatch: pristine={}, after={}",
-        pristine.len(),
-        after.len()
-    );
-    assert_eq!(
-        &after[..],
-        &pristine[..],
-        "original file must survive a panic between temp-write and rename (EXIF-07 violated)"
-    );
+    for change in [
+        pfp_exif::CaptureTimeChange::Keep,
+        pfp_exif::CaptureTimeChange::Set("1990:01:02 03:04:05".into()),
+        pfp_exif::CaptureTimeChange::Remove,
+    ] {
+        reset_fault_flag();
+        PANIC_AFTER_TEMP_WRITE.store(1, Ordering::SeqCst);
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = pfp_exif::write_metadata(&target, 35.6586, 139.7454, None, change);
+        }))
+        .is_err();
+        reset_fault_flag();
+        assert!(
+            panicked,
+            "fault injection must reach the pre-rename checkpoint"
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            pristine,
+            "the original must survive every capture-time operation"
+        );
+    }
 }
 
 #[test]
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn original_survives_writer_callback_error() {
     let _guard = fault_lock();
-    let Some(src) = first_available_fixture() else {
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("photo.jpg");
     let pristine = std::fs::read(&src).unwrap();
@@ -134,9 +108,7 @@ fn original_survives_writer_callback_error() {
 #[ignore = "requires fault-injection feature; run via `make test-fault`"]
 fn happy_path_succeeds_with_durable_write() {
     let _guard = fault_lock();
-    let Some(src) = first_available_fixture() else {
-        return;
-    };
+    let src = common::scanner_fixtures().remove(0);
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &target).unwrap();
@@ -148,25 +120,21 @@ fn happy_path_succeeds_with_durable_write() {
 
     // Sanity: read_summary now reports has_gps.
     let summary = pfp_exif::read_summary(&target).expect("read_summary");
-    assert!(summary.has_gps, "expected has_gps=true after happy-path write");
+    assert!(
+        summary.has_gps,
+        "expected has_gps=true after happy-path write"
+    );
 
     // No orphan temp files left in the parent dir (parent is `tmp.path()`).
     let orphans: Vec<_> = std::fs::read_dir(tmp.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(".pfp-tmp-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".pfp-tmp-"))
         .collect();
     assert!(
         orphans.is_empty(),
         "found orphan temp file(s) after happy-path write: {:?}",
-        orphans
-            .iter()
-            .map(|e| e.file_name())
-            .collect::<Vec<_>>()
+        orphans.iter().map(|e| e.file_name()).collect::<Vec<_>>()
     );
 }
 
@@ -260,19 +228,12 @@ fn write_via_temp_happy_path_replaces_target_and_cleans_up() {
     let orphans: Vec<_> = std::fs::read_dir(tmp.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(".pfp-tmp-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".pfp-tmp-"))
         .collect();
     assert!(
         orphans.is_empty(),
         "found orphan temp file(s) after happy-path write_via_temp: {:?}",
-        orphans
-            .iter()
-            .map(|e| e.file_name())
-            .collect::<Vec<_>>()
+        orphans.iter().map(|e| e.file_name()).collect::<Vec<_>>()
     );
 }
 
