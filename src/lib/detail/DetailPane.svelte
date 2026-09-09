@@ -147,6 +147,7 @@
     const target = { id: summary.id, fileName: summary.file_name };
     const pin = { ...pendingPin };
     const dto = pendingDto;
+    const writeDto = dtoDirty ? dto : null;
     const version = selectionVersion;
     const dialog = {
       fileName: target.fileName,
@@ -163,7 +164,7 @@
     try {
       if (!(await confirmSaveGeotag(dialog))) return;
       if (version !== selectionVersion || summary?.id !== target.id) return;
-      const fresh = await saveGeotag(target.id, pin.lat, pin.lng, dto);
+      const fresh = await saveGeotag(target.id, pin.lat, pin.lng, writeDto);
       // A completed save still updates its list row, but never another editor.
       if (version === selectionVersion && summary?.id === target.id) {
         meta = fresh;
