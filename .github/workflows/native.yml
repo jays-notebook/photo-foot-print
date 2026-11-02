@@ -39,14 +39,17 @@ jobs:
           nasm -v
       - name: Select the pinned Rust toolchain
         run: rustup show active-toolchain
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rust-cache
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: windows-msvc-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-          restore-keys: windows-msvc-
+          key: windows-msvc-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            windows-msvc-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+            windows-msvc-
       - run: npm ci
       - run: npm run check
       - run: npm test
@@ -66,3 +69,12 @@ jobs:
           path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
           retention-days: 14
+      # Keep compiled dependencies when a later test or packaging check fails.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}

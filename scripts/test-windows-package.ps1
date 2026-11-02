@@ -40,6 +40,9 @@ try {
     if ((Get-FileHash $installedApp).Hash -ne (Get-FileHash $appPath).Hash) {
         throw 'Installed application differs from the verified build'
     }
+    if (-not (Test-Path (Join-Path $installDir 'uninstall.exe') -PathType Leaf)) {
+        throw 'Installed uninstaller is missing'
+    }
 
     $app = Start-Process $installedApp -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
