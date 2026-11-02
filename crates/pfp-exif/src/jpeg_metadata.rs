@@ -20,7 +20,12 @@ pub(crate) fn write(target: &Path, metadata: &Metadata) -> io::Result<()> {
             ),
         ));
     }
-    metadata.write_to_file(target)?;
+    // little_exif 0.6.23's JPEG file writer does not truncate after an EXIF
+    // shrink. Rewrite the exact updated buffer to this atomic-save temp file;
+    // the vector API preserves the original JPEG data and any existing trailer.
+    let mut jpeg = std::fs::read(target)?;
+    metadata.write_to_vec(&mut jpeg, FileExtension::JPEG)?;
+    std::fs::write(target, jpeg)?;
     // This is still the temporary file: a malformed encoding must never commit.
     read(target)?;
     Ok(())

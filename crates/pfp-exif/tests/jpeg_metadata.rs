@@ -159,6 +159,50 @@ fn capture_time_keep_set_and_remove_round_trip() {
     );
 }
 
+fn check_capture_time_removal_preserves_trailer(trailer: &[u8]) {
+    use pfp_exif::{write_metadata, CaptureTimeChange};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shrink-exif.jpg");
+    let mut original = jpeg();
+    original.extend_from_slice(trailer);
+    std::fs::write(&path, original).unwrap();
+    write_metadata(
+        &path,
+        37.0,
+        127.0,
+        None,
+        CaptureTimeChange::Set("1995:06:07 08:09:10".into()),
+    )
+    .unwrap();
+    let with_time_length = std::fs::metadata(&path).unwrap().len();
+
+    write_metadata(&path, 37.0, 127.0, None, CaptureTimeChange::Remove).unwrap();
+
+    let saved = std::fs::read(&path).unwrap();
+    assert!(pfp_exif::read_detail(&path).unwrap().capture_time.is_none());
+    assert!(
+        (saved.len() as u64) < with_time_length,
+        "removing capture-time tags must shrink the file, not retain stale tail bytes"
+    );
+    // This minimal JPEG has no compressed data or marker-like EXIF values.
+    // Its first EOI therefore identifies the original opaque trailer exactly.
+    let eoi = saved.windows(2).position(|w| w == [0xff, 0xd9]).unwrap();
+    assert_eq!(&saved[eoi + 2..], trailer);
+}
+
+#[test]
+fn capture_time_removal_does_not_append_bytes_past_eoi() {
+    check_capture_time_removal_preserves_trailer(&[]);
+}
+
+#[test]
+fn capture_time_removal_preserves_original_jpeg_trailer() {
+    check_capture_time_removal_preserves_trailer(
+        b"\0original opaque trailer\xff\xd9\xff\xe1Exif\0\0",
+    );
+}
+
 #[test]
 fn oversized_gps_addition_leaves_original_byte_identical() {
     let dir = tempfile::tempdir().unwrap();
