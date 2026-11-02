@@ -21,6 +21,29 @@ if ([BitConverter]::ToUInt16($bytes, $pe + 24) -ne 0x20B -or
     [BitConverter]::ToUInt16($bytes, $pe + 92) -ne 2) {
     throw 'Application must be a PE32+ GUI executable without a console window'
 }
+$builtApp = Get-Item -LiteralPath $appPath
+$builtAppHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
+Write-Host ("Build EXE: {0} bytes; SHA256 {1}; {2}" -f $builtApp.Length, $builtAppHash, $builtApp.FullName)
+
+# Model the unsigned NSIS patch without changing the build output on disk.
+# Tauri replaces this fixed-length marker, packages the EXE, then restores it:
+# https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle.rs
+# Latin1 preserves each byte as one character, keeping IndexOf offsets exact.
+# Signed packages require separate validation because signing also changes bytes.
+$bundleMarker = '__TAURI_BUNDLE_TYPE_VAR_UNK'
+$nsisMarker = '__TAURI_BUNDLE_TYPE_VAR_NSS'
+$binaryText = [System.Text.Encoding]::Latin1.GetString($bytes)
+$markerOffset = $binaryText.IndexOf($bundleMarker, [System.StringComparison]::Ordinal)
+if ($markerOffset -lt 0) { throw 'Tauri bundle-type marker is missing from the build EXE' }
+if ($binaryText.IndexOf($bundleMarker, $markerOffset + $bundleMarker.Length, [System.StringComparison]::Ordinal) -ge 0) {
+    throw 'Tauri bundle-type marker is not unique in the build EXE'
+}
+$markerBytes = [System.Text.Encoding]::ASCII.GetBytes($nsisMarker)
+if ($markerBytes.Length -ne $bundleMarker.Length) { throw 'Tauri bundle-type marker lengths differ' }
+[byte[]]$expectedBytes = $bytes.Clone()
+[System.Array]::Copy($markerBytes, 0, $expectedBytes, $markerOffset, $markerBytes.Length)
+$expectedAppHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($expectedBytes))
+Write-Host ("Expected NSIS EXE: {0} bytes; SHA256 {1}" -f $expectedBytes.Length, $expectedAppHash)
 
 $installers = @(Get-ChildItem (Join-Path $ReleaseDir 'bundle/nsis/*-setup.exe'))
 if ($installers.Count -ne 1 -or $installers[0].Length -eq 0) {
@@ -37,8 +60,11 @@ try {
     if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
     $installedApp = Join-Path $installDir 'photo-foot-print.exe'
     if (-not (Test-Path $installedApp)) { throw 'Installed application is missing' }
-    if ((Get-FileHash $installedApp).Hash -ne (Get-FileHash $appPath).Hash) {
-        throw 'Installed application differs from the verified build'
+    $installedFile = Get-Item -LiteralPath $installedApp
+    $installedAppHash = (Get-FileHash -LiteralPath $installedApp -Algorithm SHA256).Hash
+    Write-Host ("Installed EXE: {0} bytes; SHA256 {1}; {2}" -f $installedFile.Length, $installedAppHash, $installedFile.FullName)
+    if ($installedAppHash -ne $expectedAppHash) {
+        throw 'Installed application differs from the expected unsigned NSIS build'
     }
     if (-not (Test-Path (Join-Path $installDir 'uninstall.exe') -PathType Leaf)) {
         throw 'Installed uninstaller is missing'
