@@ -2,7 +2,7 @@
 # Convenience targets that wrap cargo / npm so the gate runs the same way
 # locally and in any future CI.
 
-.PHONY: build check test test-gate test-fault dev clean
+.PHONY: build check test test-gate test-fault audit audit-npm audit-rust dev clean
 
 build:
 	cargo build --workspace
@@ -28,8 +28,20 @@ test-fault:
 	# Requires the `fault-injection` Cargo feature (Plan 03 lands it).
 	cargo test -p pfp-exif --test fault_injection --features fault-injection -- --include-ignored
 
+audit: audit-npm audit-rust
+
+audit-npm:
+	# Runtime dependencies: reject every severity. Development lows stay visible.
+	npm audit --omit=dev
+	npm audit --audit-level=moderate
+
+audit-rust:
+	# Install cargo-audit first; see docs/SECURITY.md for these two XML exceptions.
+	# Raw `cargo audit` still reports them. Do not add blanket severity filters.
+	cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+
 dev:
-	cargo tauri dev
+	npm run tauri -- dev
 
 clean:
 	cargo clean

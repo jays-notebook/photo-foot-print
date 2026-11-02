@@ -32,11 +32,11 @@ Install Rust through [rustup](https://rustup.rs/). The project pins Rust 1.99.1
 in `rust-toolchain.toml`, including rustfmt and Clippy. Run commands from this
 repository so rustup selects the pinned toolchain. The workspace's minimum
 supported Rust version matches this tested toolchain.
+Node.js 22.12+ on the 22.x line, 24.x, or 26+ is required by the frontend tools.
 
 ```bash
 # Prerequisites (one-time):
 rustup show active-toolchain
-cargo install tauri-cli --version "^2" --locked
 brew install exiftool git-lfs
 git lfs install --local
 
@@ -44,8 +44,12 @@ git lfs install --local
 # (`make test-gate`). See docs/FIXTURES.md for sourcing a scanner-output fixture.
 
 npm install
-cargo tauri dev
+npm run tauri -- dev
 ```
+
+The npm command uses the project-local Tauri CLI from the lockfile.
+See [security maintenance](docs/SECURITY.md) for dependency audit commands,
+automatic checks, and reviewed upstream findings.
 
 ## Project layout
 
