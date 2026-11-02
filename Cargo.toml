@@ -36,7 +36,7 @@ tauri-build = "2.7.4"
 
 # Phase 2 — image pipeline + state + dialog
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
-fast_image_resize = "5"
+fast_image_resize = "6"
 sha2 = "0.10"
 dirs = "6"
 tauri-plugin-dialog = "2.8.4"
