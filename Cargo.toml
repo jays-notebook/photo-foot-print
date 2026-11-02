@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["jay <jykim.loa2000@gmail.com>"]
-rust-version = "1.77.2"
+rust-version = "1.99.1"
 
 [workspace.dependencies]
 # EXIF
