@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      svelte-tooling:
+        patterns: ['svelte', '@sveltejs/*', 'vite', 'vitest', '@vitest/*']
+      tauri:
+        patterns: ['@tauri-apps/*']
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      tauri:
+        patterns: ['tauri', 'tauri-*', 'wry', 'tao']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
