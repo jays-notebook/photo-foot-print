@@ -32,6 +32,6 @@
     "vitest": "^5.0.5",
     "jsdom": "^25",
     "@testing-library/svelte": "^5",
-    "@testing-library/jest-dom": "^6"
+    "@testing-library/jest-dom": "^7"
   }
 }
