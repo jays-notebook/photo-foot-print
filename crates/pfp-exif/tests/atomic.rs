@@ -121,11 +121,20 @@ fn replacement_preserves_hidden_and_not_content_indexed_attributes() {
     let wide: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
     // SAFETY: wide contains the live, NUL-terminated path of our test file.
     assert_ne!(unsafe { SetFileAttributesW(wide.as_ptr(), retained) }, 0);
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().file_attributes() & retained,
+        retained,
+        "the source must have both attributes before replacement"
+    );
 
     write_via_temp(&target, |path| std::fs::write(path, b"replacement")).unwrap();
 
     let attributes = std::fs::metadata(&target).unwrap().file_attributes();
-    assert_eq!(attributes & retained, retained);
+    assert_eq!(
+        attributes & retained,
+        retained,
+        "the replacement must retain the source's hidden and indexing attributes"
+    );
     assert_eq!(attributes & FILE_ATTRIBUTE_TEMPORARY, 0);
     assert_eq!(std::fs::read(&target).unwrap(), b"replacement");
     assert_no_temporary_files(dir.path());

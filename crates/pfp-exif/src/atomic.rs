@@ -44,6 +44,11 @@ where
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
 
+    // Snapshot the source itself so attribute preservation does not depend on
+    // which flags copying into an existing temporary file retains.
+    #[cfg(windows)]
+    let original_attributes = windows::read_target_attributes(target)?;
+
     // Same-directory tempfile (NOT the process-global tmp dir; see PITFALLS.md §2).
     // Prefix `.pfp-tmp-` makes orphans visible and `.gitignore`-able. The
     // `.jpg` suffix preserves `little_exif`'s extension-based file-type
@@ -61,10 +66,10 @@ where
     }
 
     // Temporarily clear attributes on the private Windows copy so callbacks
-    // using CREATE_ALWAYS can rewrite hidden/system files. Keep the copied
-    // attributes for restoration; a read-only original stays protected.
+    // using CREATE_ALWAYS can rewrite hidden/system files. The source's own
+    // attributes are retained above; a read-only original stays protected.
     #[cfg(windows)]
-    let copied_attributes = windows::prepare_tempfile(tmp.path())?;
+    windows::prepare_tempfile(tmp.path())?;
 
     // Run the caller's writer against the same path the temp file occupies.
     // PITFALLS.md §3 (macOS xattrs) -- full xattr preservation is post-v1; documented.
@@ -73,7 +78,7 @@ where
     // Restore attributes before flushing, except READONLY (which would prevent
     // cleanup on failure) and TEMPORARY (which may suppress disk writes).
     #[cfg(windows)]
-    windows::restore_tempfile_attributes(tmp.path(), copied_attributes)?;
+    windows::restore_tempfile_attributes(tmp.path(), original_attributes)?;
 
     // Reopen the final path because the callback may replace the temporary file.
     // Windows FlushFileBuffers requires a handle with write access.
@@ -142,24 +147,36 @@ mod windows {
         Ok(wide)
     }
 
-    pub(super) fn prepare_tempfile(path: &Path) -> io::Result<u32> {
+    pub(super) fn read_target_attributes(path: &Path) -> io::Result<u32> {
         let path = wide_path(path)?;
         // SAFETY: path is a live, NUL-terminated UTF-16 string.
         let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
         if attributes == INVALID_FILE_ATTRIBUTES {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: path remains live and NUL-terminated.
-        if unsafe { SetFileAttributesW(path.as_ptr(), FILE_ATTRIBUTE_NORMAL) } == 0 {
-            return Err(io::Error::last_os_error());
+            let error = io::Error::last_os_error();
+            // The helper also supports creating a new target. All other errors
+            // must propagate before copying, writing, or replacing anything.
+            return if error.kind() == io::ErrorKind::NotFound {
+                Ok(FILE_ATTRIBUTE_NORMAL)
+            } else {
+                Err(error)
+            };
         }
         Ok(attributes)
     }
 
-    pub(super) fn restore_tempfile_attributes(path: &Path, copied: u32) -> io::Result<()> {
+    pub(super) fn prepare_tempfile(path: &Path) -> io::Result<()> {
         let path = wide_path(path)?;
-        let retained =
-            copied & !(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NORMAL);
+        // SAFETY: path is a live, NUL-terminated UTF-16 string.
+        if unsafe { SetFileAttributesW(path.as_ptr(), FILE_ATTRIBUTE_NORMAL) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn restore_tempfile_attributes(path: &Path, original: u32) -> io::Result<()> {
+        let path = wide_path(path)?;
+        let retained = original
+            & !(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NORMAL);
         // NORMAL is valid only when there are no other attributes.
         let attributes = if retained == 0 {
             FILE_ATTRIBUTE_NORMAL
