@@ -55,7 +55,10 @@ fn round_trip_dimensions_long_edge_is_target() {
 
     let long = w.max(h);
     let short = w.min(h);
-    assert_eq!(long, TARGET_LONG_EDGE, "long edge must equal target {TARGET_LONG_EDGE}");
+    assert_eq!(
+        long, TARGET_LONG_EDGE,
+        "long edge must equal target {TARGET_LONG_EDGE}"
+    );
     // Aspect ratio preserved within 1px.
     assert!(short >= 1, "short edge must be >= 1");
     assert!(short <= TARGET_LONG_EDGE, "short edge must be <= target");
@@ -70,5 +73,8 @@ fn malformed_input_returns_decode_error() {
     // Error kind: Decode (image crate fails to parse) or Io (read fail).
     // We accept either -- the behaviour we care about is "no panic, propagates Err".
     let msg = format!("{err:?}");
-    assert!(msg.contains("Decode") || msg.contains("Io"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("Decode") || msg.contains("Io"),
+        "unexpected error: {msg}"
+    );
 }

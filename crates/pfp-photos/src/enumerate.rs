@@ -27,11 +27,11 @@ use crate::jpeg::{has_jpeg_extension, is_real_jpeg};
 /// sees the `id` (path-hash indirection per Pattern 3).
 #[derive(Debug, Clone, Serialize)]
 pub struct PhotoEntry {
-    pub id: String,                  // 32 hex chars (cache_key)
+    pub id: String, // 32 hex chars (cache_key)
     pub file_name: String,
     pub absolute_path: PathBuf,
-    pub has_gps: bool,               // strict-4 (D-21) via pfp_exif::read_summary
-    pub capture_time: Option<String>,// validated DTO (D-24)
+    pub has_gps: bool,                // strict-4 (D-21) via pfp_exif::read_summary
+    pub capture_time: Option<String>, // validated DTO (D-24)
     pub size_bytes: u64,
     pub mtime_unix: i64,
 }

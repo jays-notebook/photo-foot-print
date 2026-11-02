@@ -7,6 +7,25 @@ use std::path::Path;
 
 use little_exif::{filetype::FileExtension, metadata::Metadata};
 
+/// Reject APP1 overflow before little_exif narrows the segment length to u16.
+/// The length includes its own two bytes and the six-byte `Exif\0\0` header.
+pub(crate) fn write(target: &Path, metadata: &Metadata) -> io::Result<()> {
+    const MAX_TIFF_BYTES: usize = u16::MAX as usize - 2 - 6;
+    let encoded_size = metadata.encode()?.len();
+    if encoded_size > MAX_TIFF_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "EXIF metadata is too large for a JPEG APP1 segment ({encoded_size} bytes; maximum {MAX_TIFF_BYTES})"
+            ),
+        ));
+    }
+    metadata.write_to_file(target)?;
+    // This is still the temporary file: a malformed encoding must never commit.
+    read(target)?;
+    Ok(())
+}
+
 pub(crate) fn read(target: &Path) -> io::Result<Metadata> {
     let mut reader = BufReader::new(File::open(target)?);
     let mut signature = [0; 2];

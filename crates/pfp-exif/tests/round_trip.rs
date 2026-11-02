@@ -143,7 +143,7 @@ fn datetime_original_written_or_created() {
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("photo.jpg");
     std::fs::copy(&src, &work).unwrap();
-    pfp_exif::write_gps(&work, 0.0, 0.0, None, Some("2024:06:15 12:00:00")).expect("write_gps");
+    pfp_exif::write_gps(&work, 37.0, 127.0, None, Some("2024:06:15 12:00:00")).expect("write_gps");
 
     let summary = pfp_exif::read_summary(&work).expect("read_summary");
     assert_eq!(summary.capture_time.as_deref(), Some("2024:06:15 12:00:00"));

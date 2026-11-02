@@ -91,8 +91,7 @@ mod tests {
     #[test]
     fn set_capture_time_writes_both_dto_and_dt_digitized() {
         let mut metadata = little_exif::metadata::Metadata::new();
-        super::set_capture_time(&mut metadata, "2024:01:15 14:30:00")
-            .expect("valid format");
+        super::set_capture_time(&mut metadata, "2024:01:15 14:30:00").expect("valid format");
 
         let expected = "2024:01:15 14:30:00".to_string();
         let mut found_original = false;

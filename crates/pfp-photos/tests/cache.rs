@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use pfp_photos::cache::{
-    cache_dir, cache_file, cache_key, ensure_cache_dir, read_cached_thumbnail,
-    write_atomic, THUMB_CACHE_DIR,
+    cache_dir, cache_file, cache_key, ensure_cache_dir, read_cached_thumbnail, write_atomic,
+    THUMB_CACHE_DIR,
 };
 use pfp_photos::error::PhotosError;
 
@@ -14,7 +14,9 @@ fn cache_key_is_deterministic() {
     let k2 = cache_key("photo.jpg", 1_700_000_000, 4096);
     assert_eq!(k1, k2);
     assert_eq!(k1.len(), 32);
-    assert!(k1.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+    assert!(k1
+        .chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
 }
 
 #[test]
@@ -49,7 +51,9 @@ fn cache_dir_is_dot_pfp_thumbs() {
 fn cache_file_appends_jpg() {
     let folder = Path::new("/tmp/somewhere");
     let f = cache_file(folder, "deadbeefcafebabe1234567890abcdef");
-    assert!(f.to_string_lossy().ends_with(".pfp-thumbs/deadbeefcafebabe1234567890abcdef.jpg"));
+    assert!(f
+        .to_string_lossy()
+        .ends_with(".pfp-thumbs/deadbeefcafebabe1234567890abcdef.jpg"));
 }
 
 #[test]

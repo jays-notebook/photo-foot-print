@@ -41,9 +41,9 @@ pub fn write_via_temp<F>(target: &Path, writer: F) -> io::Result<()>
 where
     F: FnOnce(&Path) -> io::Result<()>,
 {
-    let parent = target.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "target has no parent")
-    })?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
 
     // Same-directory tempfile (NOT the process-global tmp dir; see PITFALLS.md §2).
     // Prefix `.pfp-tmp-` makes orphans visible and `.gitignore`-able. The

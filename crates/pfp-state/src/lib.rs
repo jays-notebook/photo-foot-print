@@ -135,9 +135,14 @@ pub fn save_to(path: &Path, state: &AppState) -> Result<(), StateError> {
 /// This is the single entry point Plan 04's `list_folder` IPC command calls
 /// after a successful folder load (D-12).
 pub fn save_last_folder(folder: &Path) -> Result<(), StateError> {
-    let mut state = load()?;
+    save_last_folder_to(&state_path()?, folder)
+}
+
+/// Update the folder in an explicit state file, preserving the other fields.
+pub fn save_last_folder_to(path: &Path, folder: &Path) -> Result<(), StateError> {
+    let mut state = load_from(path)?;
     state.last_folder = Some(folder.to_path_buf());
-    save(&state)
+    save_to(path, &state)
 }
 
 /// Convenience: load current state (or default), update `last_pin`, save.
@@ -146,9 +151,14 @@ pub fn save_last_folder(folder: &Path) -> Result<(), StateError> {
 /// On Err, the IPC layer logs and swallows (D-47 -- best-effort
 /// persistence). This lib stays fail-loud and surfaces `StateError`.
 pub fn save_last_pin(lat: f64, lng: f64) -> Result<(), StateError> {
-    let mut state = load()?;
+    save_last_pin_to(&state_path()?, lat, lng)
+}
+
+/// Update the pin in an explicit state file, preserving the other fields.
+pub fn save_last_pin_to(path: &Path, lat: f64, lng: f64) -> Result<(), StateError> {
+    let mut state = load_from(path)?;
     state.last_pin = Some((lat, lng));
-    save(&state)
+    save_to(path, &state)
 }
 
 #[cfg(test)]
@@ -195,11 +205,8 @@ mod tests {
     fn phase3_shape_state_json_loads_with_last_pin_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("state.json");
-        std::fs::write(
-            &path,
-            r#"{"schema_version":1,"last_folder":"/tmp/photos"}"#,
-        )
-        .expect("write fixture");
+        std::fs::write(&path, r#"{"schema_version":1,"last_folder":"/tmp/photos"}"#)
+            .expect("write fixture");
 
         let state = crate::load_from(&path).expect("load_from succeeds");
         assert_eq!(state.schema_version, 1);

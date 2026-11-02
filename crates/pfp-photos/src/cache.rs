@@ -54,9 +54,7 @@ pub fn ensure_cache_dir(folder: &Path) -> Result<(), PhotosError> {
     let dir = cache_dir(folder);
     match std::fs::create_dir_all(&dir) {
         Ok(()) => Ok(()),
-        Err(e) if is_not_writable(&e) => {
-            Err(PhotosError::CacheNotWritable(folder.to_path_buf()))
-        }
+        Err(e) if is_not_writable(&e) => Err(PhotosError::CacheNotWritable(folder.to_path_buf())),
         Err(e) => Err(PhotosError::Io(e)),
     }
 }
@@ -141,15 +139,11 @@ pub fn write_atomic(folder: &Path, key: &str, bytes: &[u8]) -> Result<(), Photos
     match OpenOptions::new().read(true).open(&dir) {
         Ok(dir_fd) => {
             if let Err(e) = dir_fd.sync_all() {
-                eprintln!(
-                    "[cache::write_atomic] parent fsync failed for {dir:?}: {e}"
-                );
+                eprintln!("[cache::write_atomic] parent fsync failed for {dir:?}: {e}");
             }
         }
         Err(e) => {
-            eprintln!(
-                "[cache::write_atomic] cannot open parent {dir:?} for fsync: {e}"
-            );
+            eprintln!("[cache::write_atomic] cannot open parent {dir:?} for fsync: {e}");
         }
     }
     Ok(())

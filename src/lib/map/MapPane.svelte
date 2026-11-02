@@ -55,7 +55,7 @@
     // D-29: drag fine-tunes the pin position. dragend fires once per drag.
     marker.on("dragend", () => {
       if (!marker) return;
-      const ll = marker.getLatLng();
+      const ll = marker.getLatLng().wrap();
       onPinChange(ll.lat, ll.lng);
     });
 
@@ -65,7 +65,8 @@
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (!marker || !map) return;
       marker.setLatLng(e.latlng);
-      onPinChange(e.latlng.lat, e.latlng.lng);
+      const ll = e.latlng.wrap();
+      onPinChange(ll.lat, ll.lng);
     });
   });
 

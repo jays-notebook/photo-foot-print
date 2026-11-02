@@ -50,11 +50,9 @@ fn fixtures_root() -> PathBuf {
 /// only paths that canonicalize INTO the fixtures dir.
 fn assert_inside_fixtures_root(path_str: &str) -> Result<PathBuf, WireError> {
     let p = Path::new(path_str);
-    let canonical = p
-        .canonicalize()
-        .map_err(|e| WireError::PathTraversal {
-            detail: format!("canonicalize {path_str}: {e}"),
-        })?;
+    let canonical = p.canonicalize().map_err(|e| WireError::PathTraversal {
+        detail: format!("canonicalize {path_str}: {e}"),
+    })?;
     let root_canonical = fixtures_root()
         .canonicalize()
         .map_err(|e| WireError::PathTraversal {

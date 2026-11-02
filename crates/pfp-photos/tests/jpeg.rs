@@ -1,8 +1,8 @@
 //! Phase 2 -- jpeg.rs unit tests via integration-test seam.
 
+use pfp_photos::jpeg::{has_jpeg_extension, is_real_jpeg};
 use std::io::Write;
 use std::path::Path;
-use pfp_photos::jpeg::{has_jpeg_extension, is_real_jpeg};
 
 #[test]
 fn extension_lowercase_jpg_accepted() {
