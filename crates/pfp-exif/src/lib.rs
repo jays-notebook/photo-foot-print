@@ -79,6 +79,15 @@ pub fn write_metadata(
     altitude_m: Option<f64>,
     capture_time: CaptureTimeChange,
 ) -> Result<(), ExifError> {
+    // Match the strict GPS read policy so a successful save remains readable.
+    if !lat.is_finite()
+        || !lng.is_finite()
+        || lat.abs() >= 90.0
+        || lng.abs() >= 180.0
+        || (lat == 0.0 && lng == 0.0)
+    {
+        return Err(ExifError::InvalidCoordinates { lat, lng });
+    }
     if let CaptureTimeChange::Set(s) = &capture_time {
         // Validate up front -- fail before touching the file.
         crate::time::validate_dto_format(s)?;
@@ -110,6 +119,14 @@ pub fn write_metadata(
         ]));
         metadata.set_tag(ExifTag::GPSLongitudeRef(lng_ref.to_string()));
 
+        // Rational rounding can turn a valid input into a boundary or (0, 0).
+        if !is_gps_valid(&metadata) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "GPS coordinates round outside the supported range",
+            ));
+        }
+
         if let Some(alt) = altitude_m {
             let abs_alt = alt.abs();
             metadata.set_tag(ExifTag::GPSAltitude(vec![uR64 {
@@ -133,8 +150,7 @@ pub fn write_metadata(
             }
         }
 
-        metadata
-            .write_to_file(tmp_path)
+        crate::jpeg_metadata::write(tmp_path, &metadata)
             .map_err(|e| std::io::Error::other(format!("little_exif write: {e}")))?;
 
         Ok(())

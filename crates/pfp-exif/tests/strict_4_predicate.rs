@@ -59,9 +59,22 @@ fn new_york_n_w_valid() {
 
 // Null Island: rejected as malformed (D-21).
 #[test]
-#[ignore = "requires local scanner fixtures; run make test-gate"]
 fn null_island_invalid() {
-    predicate_at("null_island", 0.0, 0.0, false);
+    // Construct invalid existing metadata directly: the writer now rejects it.
+    let mut metadata = Metadata::new();
+    let zero = vec![
+        uR64 {
+            nominator: 0,
+            denominator: 1
+        };
+        3
+    ];
+    metadata.set_tag(ExifTag::GPSLatitude(zero.clone()));
+    metadata.set_tag(ExifTag::GPSLongitude(zero));
+    metadata.set_tag(ExifTag::GPSLatitudeRef("N".into()));
+    metadata.set_tag(ExifTag::GPSLongitudeRef("E".into()));
+    assert!(!pfp_exif::is_gps_valid(&metadata));
+    assert_eq!(pfp_exif::gps_signed_decimal(&metadata), None);
 }
 
 // Predicate returns false on a JPEG with NO GPS tags (the scanner fixtures themselves).

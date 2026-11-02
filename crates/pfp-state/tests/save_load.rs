@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use pfp_state::{load_from, save_last_folder, save_to, AppState, StateError};
+use pfp_state::{load_from, save_last_folder_to, save_to, AppState, StateError};
 
 #[test]
 fn round_trip_preserves_all_fields() {
@@ -111,31 +111,46 @@ fn save_overwrites_existing() {
     assert_eq!(loaded.last_folder, Some(PathBuf::from("/new")));
 }
 
-/// This test exercises the production `save_last_folder` (uses dirs::data_local_dir).
-/// We can't isolate the canonical path easily in a test, so we just smoke-test
-/// that the function runs without error AND that load() roundtrips.
-///
-/// The test resets `last_folder = None` at the end. The plan explicitly
-/// permits this -- it is acceptable for a personal-use tool. If it becomes
-/// a problem (CI, multiple parallel agents) the plan authorizes
-/// `#[ignore]` as the fallback.
 #[test]
-fn save_last_folder_uses_canonical_path() {
-    let test_folder =
-        std::env::temp_dir().join(format!("pfp-state-test-{}", std::process::id()));
-    std::fs::create_dir_all(&test_folder).unwrap();
+fn save_last_folder_preserves_pin_in_isolated_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("state.json");
+    let original = AppState {
+        schema_version: 2,
+        last_folder: Some(PathBuf::from("/old")),
+        last_pin: Some((37.0, 127.0)),
+    };
+    save_to(&path, &original).unwrap();
+    let folder = tmp.path().join("photos");
 
-    save_last_folder(&test_folder).expect("save_last_folder");
-    let loaded = pfp_state::load().expect("load");
+    save_last_folder_to(&path, &folder).unwrap();
+
     assert_eq!(
-        loaded.last_folder.as_deref().map(|p| p.to_path_buf()),
-        Some(test_folder.clone()),
-        "save_last_folder must persist into state.json read by load()"
+        load_from(&path).unwrap(),
+        AppState {
+            last_folder: Some(folder),
+            ..original
+        }
     );
+}
 
-    // Cleanup -- restore to a known state to avoid polluting subsequent runs.
-    let mut restored = loaded;
-    restored.last_folder = None;
-    pfp_state::save(&restored).expect("cleanup save");
-    let _ = std::fs::remove_dir(&test_folder);
+#[test]
+fn explicit_state_updates_create_missing_file_without_affecting_another_store() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first = tmp.path().join("first/state.json");
+    let second = tmp.path().join("second/state.json");
+    let folder = tmp.path().join("photos");
+    save_last_folder_to(&first, &folder).unwrap();
+    let before = std::fs::read(&first).unwrap();
+
+    pfp_state::save_last_pin_to(&second, 37.0, 127.0).unwrap();
+
+    assert_eq!(std::fs::read(&first).unwrap(), before);
+    assert_eq!(
+        load_from(&second).unwrap(),
+        AppState {
+            last_pin: Some((37.0, 127.0)),
+            ..AppState::default()
+        }
+    );
 }

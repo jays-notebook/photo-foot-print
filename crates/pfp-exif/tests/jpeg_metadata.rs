@@ -141,3 +141,110 @@ fn capture_time_keep_set_and_remove_round_trip() {
         matches!(removed.get_tag(&ExifTag::Artist(String::new())).next(), Some(ExifTag::Artist(s)) if s == "Preserved artist")
     );
 }
+
+#[test]
+fn oversized_gps_addition_leaves_original_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large-exif.jpg");
+    std::fs::write(&path, jpeg()).unwrap();
+    let mut metadata = Metadata::new();
+    metadata.set_tag(ExifTag::ImageDescription("x".repeat(65_400)));
+    metadata.write_to_file(&path).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    pfp_exif::read_detail(&path).expect("original EXIF is readable");
+
+    let result = pfp_exif::write_gps(&path, 37.0, 127.0, None, None);
+
+    assert!(result.is_err(), "oversized EXIF must be rejected");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn oversized_capture_time_addition_leaves_original_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large-exif.jpg");
+    std::fs::write(&path, jpeg()).unwrap();
+    pfp_exif::write_gps(&path, 37.0, 127.0, None, None).unwrap();
+    let mut metadata = Metadata::new_from_path(&path).unwrap();
+    metadata.set_tag(ExifTag::ImageDescription("x".repeat(65_350)));
+    metadata.write_to_file(&path).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(
+        pfp_exif::read_detail(&path).unwrap().gps,
+        Some((37.0, 127.0))
+    );
+
+    let result = pfp_exif::write_metadata(
+        &path,
+        37.0,
+        127.0,
+        None,
+        pfp_exif::CaptureTimeChange::Set("1990:01:02 03:04:05".into()),
+    );
+
+    assert!(
+        result.is_err(),
+        "capture time must not overflow existing EXIF"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn large_legal_exif_preserves_description_when_adding_gps() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large-exif.jpg");
+    std::fs::write(&path, jpeg()).unwrap();
+    let description = "x".repeat(65_350);
+    let mut metadata = Metadata::new();
+    metadata.set_tag(ExifTag::ImageDescription(description.clone()));
+    metadata.write_to_file(&path).unwrap();
+
+    pfp_exif::write_gps(&path, 37.0, 127.0, None, None).unwrap();
+
+    assert_eq!(
+        pfp_exif::read_detail(&path).unwrap().gps,
+        Some((37.0, 127.0))
+    );
+    let saved = Metadata::new_from_path(&path).unwrap();
+    assert!(
+        matches!(saved.get_tag(&ExifTag::ImageDescription(String::new())).next(),
+        Some(ExifTag::ImageDescription(s)) if s == &description)
+    );
+}
+
+#[test]
+fn invalid_coordinates_leave_original_byte_identical() {
+    for (lat, lng) in [
+        (91.0, 127.0),
+        (-91.0, 127.0),
+        (37.0, 200.0),
+        (37.0, -200.0),
+        (f64::NAN, 127.0),
+        (37.0, f64::NAN),
+        (f64::INFINITY, 127.0),
+        (37.0, f64::NEG_INFINITY),
+        (90.0, 127.0),
+        (-90.0, 127.0),
+        (37.0, 180.0),
+        (37.0, -180.0),
+        (0.0, 0.0),
+        // These round to reader-invalid values at EXIF rational precision.
+        (89.9999999999, 127.0),
+        (37.0, 179.9999999999),
+        (0.0000000001, 0.0),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("photo.jpg");
+        std::fs::write(&path, jpeg()).unwrap();
+        pfp_exif::write_gps(&path, 37.0, 127.0, None, None).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let result = pfp_exif::write_gps(&path, lat, lng, None, None);
+
+        assert!(
+            result.is_err(),
+            "invalid GPS ({lat}, {lng}) must be rejected"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+}

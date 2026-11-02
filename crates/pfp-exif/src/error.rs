@@ -17,6 +17,9 @@ pub enum ExifError {
     #[error("invalid DateTimeOriginal format: {0} (expected YYYY:MM:DD HH:MM:SS)")]
     InvalidDateTime(String),
 
+    #[error("invalid or unsupported GPS coordinates: ({lat}, {lng})")]
+    InvalidCoordinates { lat: f64, lng: f64 },
+
     #[error("path has no parent directory: {0}")]
     NoParent(PathBuf),
 }

@@ -262,21 +262,20 @@ mod tests {
         assert_eq!(s_none.tile_fetch_semaphore.available_permits(), 4);
     }
 
-    /// Plan 04-03 Task 3: pin the save_geotag write-through contract.
-    /// The host-side closure inside `spawn_blocking` calls
-    /// pfp_state::save_last_pin then re-reads via pfp_state::load.
-    /// This test exercises the lib-call sequence; the IPC-level
-    /// behaviour is verified by Plan 04-05 manual smoke step 1.
+    /// Exercise the pin persistence sequence without writing user settings.
     #[test]
     fn save_last_pin_round_trip_via_lib() {
-        // pfp_state::state_path() routes through dirs::data_local_dir()
-        // which is read-only-during-CI-safe (it's a function of
-        // $XDG_DATA_HOME / ~/Library/Application Support). The test
-        // tolerates pre-existing state.json — it overwrites with a
-        // known pin and reads back.
-        pfp_state::save_last_pin(35.6586, 139.7454)
-            .expect("save_last_pin must succeed on a writable home");
-        let loaded = pfp_state::load().expect("load must succeed after save");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let original = pfp_state::AppState {
+            last_folder: Some(dir.path().join("photos")),
+            ..pfp_state::AppState::default()
+        };
+        pfp_state::save_to(&path, &original).unwrap();
+        pfp_state::save_last_pin_to(&path, 35.6586, 139.7454).unwrap();
+        let loaded = pfp_state::load_from(&path).unwrap();
         assert_eq!(loaded.last_pin, Some((35.6586, 139.7454)));
+        assert_eq!(loaded.last_folder, original.last_folder);
+        assert_eq!(loaded.schema_version, original.schema_version);
     }
 }
