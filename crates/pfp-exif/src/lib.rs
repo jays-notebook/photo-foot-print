@@ -25,6 +25,7 @@ pub mod error;
 mod gps;
 mod jpeg_metadata;
 pub mod summary;
+mod tiff_preflight;
 mod time;
 
 pub use crate::detail::{read_detail, PhotoDetail};

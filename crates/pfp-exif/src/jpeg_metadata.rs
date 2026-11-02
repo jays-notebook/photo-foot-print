@@ -68,7 +68,10 @@ pub(crate) fn read(target: &Path) -> io::Result<Metadata> {
             let mut payload = vec![0; length - 2];
             reader.read_exact(&mut payload)?;
             if payload.starts_with(b"Exif\0\0") {
-                // TIFF offsets are relative to this payload, including thumbnails.
+                // Bound tag counts, offsets, nested IFDs and image data before
+                // little_exif can allocate from untrusted TIFF declarations.
+                crate::tiff_preflight::validate(&payload[6..])?;
+                // TIFF offsets start after Exif\0\0, including thumbnails.
                 let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe1];
                 jpeg.extend(length_bytes);
                 jpeg.extend(payload);

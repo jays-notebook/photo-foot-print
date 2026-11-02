@@ -83,6 +83,23 @@ fn corrupt_exif_and_truncated_jpegs_fail_without_changing_original() {
 }
 
 #[test]
+fn out_of_segment_ifd_is_rejected_before_reading_or_saving() {
+    // little_exif used to treat an absent IFD beyond the APP1 as empty metadata.
+    let mut payload = b"Exif\0\0II\x2a\0".to_vec();
+    payload.extend(4096_u32.to_le_bytes());
+    let mut bytes = jpeg();
+    bytes.splice(2..2, app1(&payload));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invalid-ifd.jpg");
+    std::fs::write(&path, &bytes).unwrap();
+
+    assert!(pfp_exif::read_summary(&path).is_err());
+    assert!(pfp_exif::read_detail(&path).is_err());
+    assert!(pfp_exif::write_gps(&path, 37.0, 127.0, None, None).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
 fn capture_time_keep_set_and_remove_round_trip() {
     use pfp_exif::{write_metadata, CaptureTimeChange};
     let dir = tempfile::tempdir().unwrap();
