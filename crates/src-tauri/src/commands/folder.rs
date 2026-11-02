@@ -21,7 +21,7 @@ use crate::error::WireError;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PhotoSummary {
-    pub id: String,                   // 32 hex chars (sha256 prefix)
+    pub id: String, // 32 hex chars (sha256 prefix)
     pub file_name: String,
     pub has_gps: bool,                // strict-4 (D-21)
     pub capture_time: Option<String>, // validated DTO (D-24)
@@ -38,7 +38,7 @@ pub struct FolderFooter {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FolderListing {
-    pub folder_path: String,        // canonicalized, for the toolbar label
+    pub folder_path: String, // canonicalized, for the toolbar label
     pub items: Vec<PhotoSummary>,
     pub footer: FolderFooter,
     pub thumb_cache_writable: bool, // false → frontend shows D-18 banner

@@ -88,7 +88,10 @@ fn mixed_content_folder_filters_and_counts_correctly() {
     // Each item has a 32-char lowercase hex id.
     for item in &listing.items {
         assert_eq!(item.id.len(), 32, "id length");
-        assert!(item.id.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        assert!(item
+            .id
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
         assert!(item.absolute_path.starts_with(folder));
     }
 
@@ -143,10 +146,7 @@ fn strip_exif_app1(bytes: &[u8]) -> Vec<u8> {
             return out;
         }
         // APP1 EXIF segment? Payload starts with "Exif\0\0".
-        if marker == 0xE1
-            && segment_end - i >= 10
-            && &bytes[i + 4..i + 10] == b"Exif\0\0"
-        {
+        if marker == 0xE1 && segment_end - i >= 10 && &bytes[i + 4..i + 10] == b"Exif\0\0" {
             // Skip this segment entirely.
             i = segment_end;
             continue;
@@ -184,7 +184,11 @@ fn jpeg_without_exif_segment_appears_in_listing_with_no_gps() {
     std::fs::write(folder.join("no-exif.jpg"), &stripped).unwrap();
 
     let listing = list_folder(folder).expect("list_folder");
-    assert_eq!(listing.items.len(), 1, "exif-less JPEG must still be listed");
+    assert_eq!(
+        listing.items.len(),
+        1,
+        "exif-less JPEG must still be listed"
+    );
     assert_eq!(listing.footer.read_failed, 0, "must not be in read_failed");
     let item = &listing.items[0];
     assert_eq!(item.file_name, "no-exif.jpg");
@@ -207,6 +211,10 @@ fn scanner_fixtures_have_no_gps() {
         return;
     }
     for item in &listing.items {
-        assert!(!item.has_gps, "scanner fixture {} unexpectedly has GPS", item.file_name);
+        assert!(
+            !item.has_gps,
+            "scanner fixture {} unexpectedly has GPS",
+            item.file_name
+        );
     }
 }

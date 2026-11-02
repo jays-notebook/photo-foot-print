@@ -9,9 +9,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor};
 use std::path::Path;
 
-use fast_image_resize::{
-    images::Image, FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer,
-};
+use fast_image_resize::{images::Image, FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::{codecs::jpeg::JpegEncoder, ColorType, ImageEncoder, ImageReader};
 
 use crate::error::PhotosError;
@@ -49,8 +47,7 @@ pub fn decode_resize_encode(src: &Path) -> Result<Vec<u8>, PhotosError> {
         .map_err(|e| PhotosError::Resize(e.to_string()))?;
     let mut dst = Image::new(dst_w, dst_h, PixelType::U8x3);
     let mut resizer = Resizer::new();
-    let options =
-        ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3));
+    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3));
     resizer
         .resize(&src_view, &mut dst, &options)
         .map_err(|e| PhotosError::Resize(e.to_string()))?;

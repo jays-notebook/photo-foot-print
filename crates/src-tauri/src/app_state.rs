@@ -58,10 +58,7 @@ impl TauriAppState {
     /// `pfp_state::load()` (Phase 4 D-46). Pass `None` when no prior
     /// pin is on disk, or when `pfp_state::load` failed and the caller
     /// fell back to `AppState::default()`.
-    pub fn with_tiles(
-        tiles: pfp_tiles::TileCache,
-        initial_last_pin: Option<(f64, f64)>,
-    ) -> Self {
+    pub fn with_tiles(tiles: pfp_tiles::TileCache, initial_last_pin: Option<(f64, f64)>) -> Self {
         let permits = std::thread::available_parallelism()
             .map(|n| n.get().min(4))
             .unwrap_or(4);
