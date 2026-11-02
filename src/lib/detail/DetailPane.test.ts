@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
+import { clearMocks, mockConvertFileSrc } from "@tauri-apps/api/mocks";
 import DetailPane from "./DetailPane.svelte";
 import * as ipc from "../ipc";
 import * as dialog from "../save/saveDialog";
@@ -27,10 +28,14 @@ const meta = (id: string): ipc.PhotoMeta => ({
 });
 beforeEach(() => {
   vi.resetAllMocks();
+  mockConvertFileSrc("macos");
   vi.mocked(ipc.getSessionLastPin).mockResolvedValue(null);
   vi.mocked(dialog.confirmSaveGeotag).mockResolvedValue(true);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearMocks();
+});
 
 test("disables saving until the selected photo has loaded", async () => {
   const read = deferred<ipc.PhotoMeta>();
@@ -78,6 +83,19 @@ test("cancels a pending confirmation when selection changes", async () => {
   confirm.resolve(true);
   await waitFor(() => expect(view.queryByText("Saving...")).toBeNull());
   expect(ipc.saveGeotag).not.toHaveBeenCalled();
+});
+
+test("does not write or update the photo after native confirmation is dismissed", async () => {
+  const onSaved = vi.fn();
+  vi.mocked(ipc.readPhotoMeta).mockResolvedValue(meta("A"));
+  vi.mocked(dialog.confirmSaveGeotag).mockResolvedValue(false);
+  const view = render(DetailPane, { summary: summary("A"), onSaved });
+  await waitFor(() => expect((view.getByRole("button", {name: "Save"}) as HTMLButtonElement).disabled).toBe(false));
+  await fireEvent.click(view.getByRole("button", {name: "Save"}));
+  await waitFor(() => expect(dialog.confirmSaveGeotag).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(view.queryByText("Saving...")).toBeNull());
+  expect(ipc.saveGeotag).not.toHaveBeenCalled();
+  expect(onSaved).not.toHaveBeenCalled();
 });
 
 

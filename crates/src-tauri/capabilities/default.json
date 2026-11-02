@@ -1,11 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability. Asset protocol + core defaults + dialog ask/message for the Save geotag confirm + error dialogs (Phase 3, D-39 / D-41). The folder dialog is still proxied through commands::folder::open_folder_dialog from Rust; no fs:* permissions are exposed to JS.",
+  "description": "Core defaults and native error messages. Folder selection and safe save confirmation run through Rust commands; no fs:* permissions are exposed to JS.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:allow-ask",
     "dialog:allow-message"
   ]
 }

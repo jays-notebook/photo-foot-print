@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import type { PhotoSummary } from "../ipc";
   import GpsBadge from "./GpsBadge.svelte";
 
@@ -13,9 +14,7 @@
 
   // The src URL changes whenever thumbVersion changes (forces <img> reload).
   let imgSrc = $derived(
-    thumbVersion > 0
-      ? `pfp-thumb://${summary.id}?v=${thumbVersion}`
-      : `pfp-thumb://${summary.id}`,
+    `${convertFileSrc("", "pfp-thumb")}${summary.id}${thumbVersion > 0 ? `?v=${thumbVersion}` : ""}`,
   );
 
   // WR-08: previously the <img> visibility was toggled by writing to

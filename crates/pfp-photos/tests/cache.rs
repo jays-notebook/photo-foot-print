@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use pfp_photos::cache::{
-    cache_dir, cache_file, cache_key, ensure_cache_dir, read_cached_thumbnail, write_atomic,
-    THUMB_CACHE_DIR,
+    cache_dir, cache_file, cache_key, ensure_cache_dir, probe_cache_writable,
+    read_cached_thumbnail, write_atomic, THUMB_CACHE_DIR,
 };
 use pfp_photos::error::PhotosError;
 
@@ -51,9 +51,12 @@ fn cache_dir_is_dot_pfp_thumbs() {
 fn cache_file_appends_jpg() {
     let folder = Path::new("/tmp/somewhere");
     let f = cache_file(folder, "deadbeefcafebabe1234567890abcdef");
-    assert!(f
-        .to_string_lossy()
-        .ends_with(".pfp-thumbs/deadbeefcafebabe1234567890abcdef.jpg"));
+    assert_eq!(
+        f,
+        folder
+            .join(".pfp-thumbs")
+            .join("deadbeefcafebabe1234567890abcdef.jpg")
+    );
 }
 
 #[test]
@@ -90,4 +93,26 @@ fn read_missing_returns_io_error() {
     let tmp = tempfile::tempdir().unwrap();
     let err = read_cached_thumbnail(tmp.path(), "deadbeefcafebabe1234567890abcdef").unwrap_err();
     assert!(matches!(err, PhotosError::Io(_)));
+}
+
+#[test]
+fn unicode_folder_probe_and_cache_write_leave_no_temporary_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("스캔 사진 📷");
+    std::fs::create_dir(&folder).unwrap();
+
+    assert!(probe_cache_writable(&folder));
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+
+    write_atomic(&folder, "photo", b"first thumbnail").unwrap();
+    write_atomic(&folder, "photo", b"replacement thumbnail").unwrap();
+    assert_eq!(
+        read_cached_thumbnail(&folder, "photo").unwrap(),
+        b"replacement thumbnail"
+    );
+    let entries: Vec<_> = std::fs::read_dir(folder.join(".pfp-thumbs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, vec![std::ffi::OsString::from("photo.jpg")]);
 }

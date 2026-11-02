@@ -2979,6 +2979,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 1.0.69",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3085,10 +3086,12 @@ name = "photo-foot-print"
 version = "0.1.0"
 dependencies = [
  "http 1.5.0",
+ "image",
  "pfp-exif",
  "pfp-photos",
  "pfp-state",
  "pfp-tiles",
+ "rfd",
  "serde",
  "serde_json",
  "sha2",

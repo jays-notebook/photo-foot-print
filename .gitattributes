@@ -1,5 +1,5 @@
-# Git LFS: store DSLR fixture JPEGs as binary blobs in LFS, not in the git
-# object database. Keeps the repo lean; every clone gets the fixtures.
+# Retain LFS handling for historical fixture paths. Current scanner fixtures
+# are private and ignored; portable CI generates synthetic JPEGs at test time.
 tests/fixtures/**/*.jpg filter=lfs diff=lfs merge=lfs -text
 tests/fixtures/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
 

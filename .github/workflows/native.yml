@@ -1,0 +1,68 @@
+name: Native desktop
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install NASM for the TLS backend
+        shell: pwsh
+        run: |
+          choco install nasm --yes --no-progress
+          if ($LASTEXITCODE -notin @(0, 3010)) { throw "NASM installation failed" }
+          $nasmDir = Join-Path $env:ProgramFiles 'NASM'
+          $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:Path = "$nasmDir;$env:Path"
+          nasm -v
+      - name: Select the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-msvc-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: windows-msvc-
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Atomic-save fault tests without private scanner fixtures
+        run: cargo test -p pfp-exif --test fault_injection --features fault-injection --locked
+      - name: Build the Windows installer
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --ci --no-sign -- --locked
+      - name: Verify, install, launch, and uninstall
+        shell: pwsh
+        run: ./scripts/test-windows-package.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: photo-foot-print-windows-x64-${{ github.sha }}
+          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

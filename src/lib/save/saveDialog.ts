@@ -1,26 +1,8 @@
-// Phase 3 / Phase 4 native dialog wrappers. D-38 / D-39 / D-41 / D-60.
-//
-// confirmSaveGeotag uses the inverted-semantics fallback because
-// @tauri-apps/plugin-dialog::ask() does NOT expose a defaultButton parameter
-// (RESEARCH VERIFIED FINDING). We pass okLabel='Cancel', cancelLabel='Save',
-// then invert the boolean. The macOS native warning dialog renders the OK
-// button (now labeled 'Cancel') as the default-focused / rightmost button,
-// satisfying D-39's "Enter dismisses without saving" contract.
-//
-// VERIFICATION GATE: planner flagged this requires a manual smoke check
-// on the first dev build (Plan 05). If macOS surfaces the buttons in a
-// different order, fall back to a Rust-side MessageDialogBuilder
-// .default_button(MessageDialogButton::Cancel) IPC.
-//
-// Phase 4 (D-60): SaveDialogProps widens with newDto/oldDto/dirtyCoords/dirtyDto;
-// body builder gains conditional 'Coordinates:' and 'Capture time:' sections
-// (UI-SPEC §8.2/§8.3); title flips between 'Save geotag?' (coords-only) and
-// 'Save photo metadata?' (DTO involved). Inverted semantics (Pitfall 9) are
-// preserved on every body branch — locked by the unit test
-// saveDialog.inverted-semantics.
-
-import { ask, message } from "@tauri-apps/plugin-dialog";
+// Native save confirmation preserves Cancel as the default on macOS and Windows.
+// Rust reads raw dialog results so Escape/window close can never become Save.
+import { message } from "@tauri-apps/plugin-dialog";
 import { toDisplay } from "../datetime/exifDateTime";
+import { confirmSave } from "../ipc";
 
 export interface SaveDialogProps {
   fileName: string;
@@ -83,16 +65,7 @@ export async function confirmSaveGeotag(
   const body = buildSaveDialogBody(props);
   const title = buildSaveDialogTitle(props);
 
-  // Inverted semantics (Pitfall 9 lock — UI-SPEC §8.4): okLabel='Cancel'
-  // makes Cancel the default-focused button so Enter dismisses. Returned
-  // `true` means user clicked the default ("Cancel"); we flip.
-  const okIsCancel = await ask(body, {
-    title,
-    kind: "warning",
-    okLabel: "Cancel",
-    cancelLabel: "Save",
-  });
-  return !okIsCancel;
+  return await confirmSave(title, body);
 }
 
 /** Phase 3 (D-41): show a native error dialog when save_geotag fails.

@@ -1,9 +1,10 @@
-//! Atomic write: same-directory tempfile -> fsync -> F_FULLFSYNC (macOS) ->
-//! rename -> parent-directory fsync.
+//! Atomic write: same-directory tempfile -> file flush -> platform replacement.
+//! macOS adds F_FULLFSYNC; Unix syncs the parent directory after replacement.
+//! Windows uses MoveFileExW with REPLACE_EXISTING and WRITE_THROUGH.
 //!
 //! Phase 1 success criterion #4 (EXIF-07): a crash mid-write MUST never leave
-//! the original truncated or corrupt. The full pattern below is what
-//! `little_exif`'s `write_to_file` is wrapped in by `pfp_exif::write_gps`.
+//! the original truncated or corrupt. `pfp_exif::write_metadata` uses this
+//! helper around its JPEG metadata rewrite and readback validation.
 //!
 //! Sources:
 //! - Apple fcntl(2) manpage: F_FULLFSYNC "asks the drive to flush all buffered
@@ -11,11 +12,11 @@
 //!   guarantee media-level flush.
 //! - tempfile docs: NamedTempFile::persist does an atomic rename but does NOT
 //!   fsync the file or the directory; we wrap it manually.
-//! - PITFALLS.md §2: temp file MUST be in the target's parent dir, not the
-//!   process-global tmp dir -- cross-volume rename falls back to copy-and-unlink
-//!   and is no longer atomic.
+//! - MoveFileExW: WRITE_THROUGH waits for the move to complete on disk. We do
+//!   not enable COPY_ALLOWED: a cross-volume copy/delete is not an atomic move.
+//!   Actual power-loss durability still depends on the filesystem and device.
 
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
 
@@ -23,7 +24,7 @@ use std::path::Path;
 use std::os::unix::io::AsRawFd;
 
 /// Write to a same-directory tempfile via `writer`, then atomically rename it
-/// over `target` with full durability:
+/// over `target`, flushing the file before committing the replacement:
 ///
 /// 1. Create a sibling NamedTempFile in `target.parent()`.
 /// 2. Seed the temp with the original's bytes so callers (e.g.,
@@ -33,10 +34,8 @@ use std::os::unix::io::AsRawFd;
 /// 5. F_FULLFSYNC(temp_fd) on macOS -- ask the drive to flush its own cache.
 /// 6. Fault-injection point (`PANIC_AFTER_TEMP_WRITE`) -- exposed only when
 ///    `cfg(test)` or `feature = "fault-injection"` is set.
-/// 7. tempfile.persist(target) -- atomic rename.
-/// 8. fsync(parent_dir_fd) -- durably commit the rename.
-///
-/// Signature is identical to Plan 02's stub.
+/// 7. Atomic replacement: tempfile.persist on Unix, write-through move on Windows.
+/// 8. On Unix, fsync(parent_dir_fd) to commit the directory entry.
 pub fn write_via_temp<F>(target: &Path, writer: F) -> io::Result<()>
 where
     F: FnOnce(&Path) -> io::Result<()>,
@@ -54,22 +53,32 @@ where
         .suffix(".jpg")
         .tempfile_in(parent)?;
 
-    // Seed the temp with the original's bytes so the writer callback (which
-    // mutates EXIF in place via `little_exif::Metadata::write_to_file`) has a
-    // valid JPEG to start from. If `target` does not yet exist (synthesized
+    // Seed the temp with the original's bytes so the JPEG metadata rewrite
+    // has a valid JPEG to start from. If `target` does not yet exist (synthesized
     // tests), skip seeding -- the writer must populate the temp itself.
     if target.exists() {
         std::fs::copy(target, tmp.path())?;
     }
 
+    // Temporarily clear attributes on the private Windows copy so callbacks
+    // using CREATE_ALWAYS can rewrite hidden/system files. Keep the copied
+    // attributes for restoration; a read-only original stays protected.
+    #[cfg(windows)]
+    let copied_attributes = windows::prepare_tempfile(tmp.path())?;
+
     // Run the caller's writer against the same path the temp file occupies.
     // PITFALLS.md §3 (macOS xattrs) -- full xattr preservation is post-v1; documented.
     writer(tmp.path())?;
 
-    // Step 4: fsync the temp FD. Reopening in read mode for the FD because the
-    // writer callback may have closed its own File handle.
+    // Restore attributes before flushing, except READONLY (which would prevent
+    // cleanup on failure) and TEMPORARY (which may suppress disk writes).
+    #[cfg(windows)]
+    windows::restore_tempfile_attributes(tmp.path(), copied_attributes)?;
+
+    // Reopen the final path because the callback may replace the temporary file.
+    // Windows FlushFileBuffers requires a handle with write access.
     {
-        let f = File::open(tmp.path())?;
+        let f = OpenOptions::new().read(true).write(true).open(tmp.path())?;
         f.sync_all()?;
 
         // Step 5: macOS-strength durability -- F_FULLFSYNC asks the drive to
@@ -84,26 +93,107 @@ where
                 return Err(io::Error::last_os_error());
             }
         }
-        // f is dropped here, closing the read FD. The temp file's bytes are durable.
+        // Drop this handle before attempting to replace the original.
     }
 
     // Step 6: fault-injection hook (test-only). The panic fires AFTER the temp
-    // file is on durable media but BEFORE the rename, so the test can verify
+    // file flush has succeeded but BEFORE the rename, so the test can verify
     // the original target is untouched.
     #[cfg(any(test, feature = "fault-injection"))]
     fault_inject::maybe_panic_after_temp_write();
 
-    // Step 7: atomic rename. tempfile::NamedTempFile::persist consumes the
-    // temp handle and does std::fs::rename under the hood.
+    #[cfg(windows)]
+    windows::persist(tmp, target)?;
+    #[cfg(not(windows))]
     tmp.persist(target).map_err(|e| e.error)?;
 
-    // Step 8: fsync the parent directory so the rename is durable. Without
-    // this, a power loss after the rename can revert the directory entry on
-    // some filesystems even though the temp file's contents are flushed.
-    let parent_fd = OpenOptions::new().read(true).open(parent)?;
-    parent_fd.sync_all()?;
+    // Windows does not support this Unix directory-open/fsync sequence; its
+    // replacement above requests write-through instead. Keep Unix errors visible.
+    #[cfg(unix)]
+    {
+        let parent_fd = OpenOptions::new().read(true).open(parent)?;
+        parent_fd.sync_all()?;
+    }
 
     Ok(())
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileAttributesW, MoveFileExW, SetFileAttributesW, FILE_ATTRIBUTE_NORMAL,
+        FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_TEMPORARY, INVALID_FILE_ATTRIBUTES,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
+        let mut wide: Vec<_> = path.as_os_str().encode_wide().collect();
+        if wide.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "file paths cannot contain NUL characters",
+            ));
+        }
+        wide.push(0);
+        Ok(wide)
+    }
+
+    pub(super) fn prepare_tempfile(path: &Path) -> io::Result<u32> {
+        let path = wide_path(path)?;
+        // SAFETY: path is a live, NUL-terminated UTF-16 string.
+        let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
+        if attributes == INVALID_FILE_ATTRIBUTES {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: path remains live and NUL-terminated.
+        if unsafe { SetFileAttributesW(path.as_ptr(), FILE_ATTRIBUTE_NORMAL) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(attributes)
+    }
+
+    pub(super) fn restore_tempfile_attributes(path: &Path, copied: u32) -> io::Result<()> {
+        let path = wide_path(path)?;
+        let retained =
+            copied & !(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NORMAL);
+        // NORMAL is valid only when there are no other attributes.
+        let attributes = if retained == 0 {
+            FILE_ATTRIBUTE_NORMAL
+        } else {
+            retained
+        };
+        // SAFETY: path is a live, NUL-terminated UTF-16 string.
+        if unsafe { SetFileAttributesW(path.as_ptr(), attributes) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn persist(mut tmp: tempfile::NamedTempFile, target: &Path) -> io::Result<()> {
+        let source = wide_path(tmp.path())?;
+        let target = wide_path(target)?;
+        // SAFETY: both paths remain live and NUL-terminated for this call.
+        // Sibling paths keep the move on one volume. COPY_ALLOWED is omitted.
+        if unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                target.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } == 0
+        {
+            // tmp still owns the old path, so failure removes only the copy.
+            return Err(io::Error::last_os_error());
+        }
+        // The source name no longer belongs to us. Retire cleanup only after
+        // successful replacement, then let the writable file handle close.
+        tmp.disable_cleanup(true);
+        Ok(())
+    }
 }
 
 /// Test-only fault-injection hook for Phase 1 success criterion #4 (EXIF-07).

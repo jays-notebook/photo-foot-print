@@ -4,6 +4,7 @@
 //! D-08: this directory and `crate::protocols` are the ONLY places where
 //! `tauri::*` symbols meet pfp_* lib types.
 
+pub mod confirmation;
 pub mod exif; // Phase 1 — kept for ipc_smoke regression test.
 pub mod folder; // Phase 2 — open_folder_dialog, list_folder, read_photo_meta.
 pub mod geotag; // Phase 3 — save_geotag, get_session_last_pin.

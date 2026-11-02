@@ -1,10 +1,11 @@
 //! pfp-thumb:// async URI scheme handler. Serves cached thumbnail bytes
 //! directly to <img src=...> without crossing the JSON IPC boundary.
 //!
-//! Wire shape: pfp-thumb://<id>   (id is the 32-hex-char cache_key)
+//! Normalized wire shape: pfp-thumb://localhost/<id> (32-hex-char cache_key).
+//! WebView2 uses http://pfp-thumb.localhost/<id>; Wry normalizes it for us.
 //!   200 image/jpeg + immutable cache header on cache hit
 //!   404 on cache miss (frontend retries after thumbnail-ready event)
-//!   400 on missing host
+//!   400 on malformed origin or id
 //!   500 reserved for internal errors (lock poisoning, missing parent path)
 //!
 //! Pitfalls: 2-B (always set Content-Type), 2-E (no path canonicalization
@@ -15,6 +16,15 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, UriSchemeContext, UriSchemeResponder};
 
 use crate::app_state::TauriAppState;
+
+fn parse_id(uri: &http::Uri) -> Option<&str> {
+    let id = super::local_protocol_path(uri, "pfp-thumb")?.strip_prefix('/')?;
+    (id.len() == 32
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then_some(id)
+}
 
 /// Build + send an HTTP response. WR-05: every prior call site used
 /// `.body(...).unwrap()`, which panics if `http::response::Builder`
@@ -58,10 +68,8 @@ pub fn handle<R: tauri::Runtime>(
 ) {
     let app: AppHandle<R> = ctx.app_handle().clone();
     tauri::async_runtime::spawn(async move {
-        let url = request.uri();
-        // Parse "pfp-thumb://<host>". Use the host segment as the id.
-        let id = match url.host() {
-            Some(h) => h.to_string(),
+        let id = match parse_id(request.uri()) {
+            Some(id) => id.to_owned(),
             None => {
                 respond(responder, 400, None, None, Vec::new());
                 return;
@@ -112,4 +120,40 @@ pub fn handle<R: tauri::Runtime>(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thumbnail_id_comes_from_the_normalized_uri_path() {
+        // Wry normalizes Windows http://pfp-thumb.localhost/... to this URI.
+        let uri = "pfp-thumb://localhost/0123456789abcdef0123456789abcdef?v=4"
+            .parse()
+            .unwrap();
+        assert_eq!(parse_id(&uri), Some("0123456789abcdef0123456789abcdef"));
+    }
+
+    #[test]
+    fn thumbnail_uri_rejects_unexpected_origins_and_paths() {
+        for value in [
+            "pfp-thumb://0123456789abcdef0123456789abcdef",
+            "pfp-thumb://other/0123456789abcdef0123456789abcdef",
+            "pfp-thumb://localhost:80/0123456789abcdef0123456789abcdef",
+            "pfp-thumb://user@localhost/0123456789abcdef0123456789abcdef",
+            "http://localhost/0123456789abcdef0123456789abcdef",
+            "pfp-thumb://localhost/",
+            "pfp-thumb://localhost/short",
+            "pfp-thumb://localhost/0123456789abcdef0123456789abcdeg",
+            "pfp-thumb://localhost/0123456789abcdef0123456789abcdef/extra",
+            "pfp-thumb://localhost/../0123456789abcdef0123456789abcdef",
+            "pfp-thumb://localhost/%2e%2e%2f0123456789abcdef0123456789abcdef",
+        ] {
+            assert!(
+                parse_id(&value.parse().unwrap()).is_none(),
+                "accepted {value}"
+            );
+        }
+    }
 }

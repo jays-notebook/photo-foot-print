@@ -2,10 +2,11 @@
 //!
 //! Cache layout: `<photo-folder>/.pfp-thumbs/<sha256(file_name||mtime||size)[:16]>.jpg`
 //!
-//! Atomic write: sibling tempfile -> sync_all -> persist -> parent fsync.
+//! Atomic write: sibling tempfile -> sync_all -> persist -> Unix parent fsync.
 //! No `F_FULLFSYNC`: thumbnails are regenerable, the in-place gold-plated
 //! durability path is reserved for `pfp-exif::atomic::write_via_temp` (Phase 1).
 
+#[cfg(unix)]
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -42,14 +43,8 @@ pub fn cache_file(folder: &Path, key: &str) -> PathBuf {
 /// (or if it already exists), `Err(PhotosError::CacheNotWritable)` on permission
 /// error or read-only filesystem (D-18 banner trigger).
 ///
-/// We classify the read-only filesystem case via two channels because
-/// `std::io::ErrorKind::ReadOnlyFilesystem` is gated on Rust 1.83+ and the
-/// workspace MSRV is 1.77.2 (matched to Tauri 2.x):
-///   1. `raw_os_error() == Some(EROFS)` (30 on Linux/macOS, 6276 on Windows)
-///      -- the platform error code, the most reliable signal.
-///   2. Substring match `"read-only file system"` in the error display --
-///      a fallback for the (rare) case where the raw OS code is not
-///      surfaced or differs across libc variants.
+/// Use portable error kinds, including Windows ERROR_WRITE_PROTECT, instead of
+/// matching localized operating-system error messages.
 pub fn ensure_cache_dir(folder: &Path) -> Result<(), PhotosError> {
     let dir = cache_dir(folder);
     match std::fs::create_dir_all(&dir) {
@@ -60,22 +55,12 @@ pub fn ensure_cache_dir(folder: &Path) -> Result<(), PhotosError> {
 }
 
 /// True iff the io::Error indicates the destination is not writable due to
-/// permissions or a read-only filesystem. See `ensure_cache_dir` for why
-/// this is implemented as a function rather than a `matches!` over
-/// `ErrorKind` variants.
+/// permissions or a read-only filesystem.
 fn is_not_writable(e: &std::io::Error) -> bool {
-    if e.kind() == std::io::ErrorKind::PermissionDenied {
-        return true;
-    }
-    // EROFS: Linux/macOS = 30. (Windows returns ERROR_WRITE_PROTECT = 19,
-    // mapped by Rust to ErrorKind::PermissionDenied in practice; treat the
-    // string match as the catch-all there.)
-    if cfg!(unix) && e.raw_os_error() == Some(30) {
-        return true;
-    }
-    e.to_string()
-        .to_ascii_lowercase()
-        .contains("read-only file system")
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    )
 }
 
 /// Probe whether the cache directory *would* be writable, WITHOUT
@@ -116,7 +101,7 @@ pub fn probe_cache_writable(folder: &Path) -> bool {
     }
 }
 
-/// Atomic write: sibling tempfile in the cache dir, sync_all, persist, parent fsync.
+/// Atomic write: sibling tempfile, sync_all, persist, and Unix parent fsync.
 pub fn write_atomic(folder: &Path, key: &str, bytes: &[u8]) -> Result<(), PhotosError> {
     ensure_cache_dir(folder)?;
     let dir = cache_dir(folder);
@@ -136,6 +121,9 @@ pub fn write_atomic(folder: &Path, key: &str, bytes: &[u8]) -> Result<(), Photos
     // are regenerable -- we accept that loss; we just refuse to swallow
     // it silently. WR-03: log so disk-full / quota-exceeded surfaces
     // at least in dev runs instead of disappearing.
+    // Windows has no equivalent Unix directory-fsync call. Losing this
+    // regenerable cache entry after a power loss is acceptable.
+    #[cfg(unix)]
     match OpenOptions::new().read(true).open(&dir) {
         Ok(dir_fd) => {
             if let Err(e) = dir_fd.sync_all() {
@@ -162,4 +150,20 @@ fn hex_lowercase(bytes: &[u8]) -> String {
         out.push(HEX[(b & 0xf) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_not_writable;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn read_only_filesystem_is_classified_without_relying_on_english_os_messages() {
+        assert!(is_not_writable(&Error::new(
+            ErrorKind::ReadOnlyFilesystem,
+            "Schreibgeschütztes Dateisystem"
+        )));
+        assert!(is_not_writable(&Error::from(ErrorKind::PermissionDenied)));
+        assert!(!is_not_writable(&Error::from(ErrorKind::StorageFull)));
+    }
 }

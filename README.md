@@ -1,16 +1,19 @@
 # photo-foot-print
 
-A native macOS desktop app for one-photo-at-a-time geotagging of
+A native macOS and Windows 10/11 x64 desktop app for one-photo-at-a-time geotagging of
 film/slide-scanner-output JPEGs (NORITSU-class scanners, typically
 Photoshop-processed) that lack EXIF GPS coordinates. Pick a photo, click a spot
 on a map (or paste lat/lng), and the GPS lands in the original JPEG.
 
-Built for a personal film workflow — a macOS-only, local developer build (no
-signing, no notarization, no installer).
+Built for a personal film workflow, with a local macOS app bundle and a
+per-user Windows NSIS installer. Builds are unsigned; no notarization or
+automatic update service is configured.
 
 ## Status
 
-v1.0 shipped 2026-06-23. macOS local developer build.
+v1.0 shipped on macOS on 2026-06-23. Windows 10/11 x64 support uses system
+WebView2 and native Windows CI. See [Windows setup and validation](docs/WINDOWS.md)
+for prerequisites, installer output, and the distinction between CI and desktop checks.
 
 ## Features
 
@@ -34,16 +37,20 @@ repository so rustup selects the pinned toolchain. The workspace's minimum
 supported Rust version matches this tested toolchain.
 Node.js 22.12+ on the 22.x line, 24.x, or 26+ is required by the frontend tools.
 
-```bash
-# Prerequisites (one-time):
+On macOS, install the Xcode Command Line Tools and ExifTool for the optional
+private scanner fixture gate:
+
+```sh
+xcode-select --install
+brew install exiftool
+```
+
+On Windows, install the MSVC C++ build tools, Windows SDK, NASM, and WebView2
+as described in [WINDOWS.md](docs/WINDOWS.md). Then, on either platform:
+
+```sh
 rustup show active-toolchain
-brew install exiftool git-lfs
-git lfs install --local
-
-# exiftool + git-lfs are required for the metadata-preservation gate
-# (`make test-gate`). See docs/FIXTURES.md for sourcing a scanner-output fixture.
-
-npm install
+npm ci
 npm run tauri -- dev
 ```
 
@@ -59,10 +66,11 @@ automatic checks, and reviewed upstream findings.
 - `crates/pfp-tiles/` — OSM tile cache proxy
 - `crates/pfp-state/` — persisted app state / last-used pin
 - `src/` — Svelte 5 frontend (no SvelteKit)
-- `tests/fixtures/scanner/` — representative scanner-output JPEGs, stored via Git LFS
+- `tests/fixtures/scanner/` — private scanner-output JPEGs, supplied locally and ignored by Git
+- `tests/support/` — deterministic synthetic JPEGs generated at test time for portable smoke tests
 
 ## Architectural constraints
 
-- Tauri 2 + OS-native WebKit webview only — no bundled Chromium under any circumstance.
-- The four `pfp-*` lib crates carry zero `tauri::*` symbols (preserves the future-Windows seam).
-- macOS-only for v1; cross-platform packaging is post-v1 by design.
+- Tauri 2 + system WebKit on macOS and Evergreen WebView2 on Windows; no bundled Chromium or fixed WebView2 runtime.
+- The four `pfp-*` library crates carry zero `tauri::*` symbols.
+- JPEG-only, one-photo-at-a-time editing. Linux, Windows ARM64, batch editing and signed releases are separate scope decisions.
