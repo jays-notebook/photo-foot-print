@@ -45,18 +45,19 @@ if ($markerBytes.Length -ne $bundleMarker.Length) { throw 'Tauri bundle-type mar
 $expectedAppHash = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($expectedBytes))
 Write-Host ("Expected NSIS EXE: {0} bytes; SHA256 {1}" -f $expectedBytes.Length, $expectedAppHash)
 
-$installers = @(Get-ChildItem (Join-Path $ReleaseDir 'bundle/nsis/*-setup.exe'))
-if ($installers.Count -ne 1 -or $installers[0].Length -eq 0) {
-    throw 'Expected exactly one nonempty NSIS installer'
+$version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../package.json') -Raw | ConvertFrom-Json).version
+$installer = Get-Item -LiteralPath (Join-Path $ReleaseDir "bundle/nsis/photo-foot-print_${version}_x64-setup.exe")
+if ($installer.Length -eq 0) {
+    throw 'Expected a nonempty NSIS installer for the current product version'
 }
-Get-FileHash $installers[0].FullName -Algorithm SHA256 | Format-List
+Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256 | Format-List
 
 # A fresh per-run path avoids modifying any pre-existing installation.
 $installDir = Join-Path ([System.IO.Path]::GetTempPath()) ('pfp smoke ' + [guid]::NewGuid())
 $app = $null
 try {
     # NSIS requires /D last; the unquoted remainder supports spaces in the path.
-    $setup = Start-Process $installers[0].FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru
+    $setup = Start-Process $installer.FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru
     if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
     $installedApp = Join-Path $installDir 'photo-foot-print.exe'
     if (-not (Test-Path $installedApp)) { throw 'Installed application is missing' }
@@ -95,4 +96,9 @@ try {
         }
     }
     if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+}
+
+# Export only the verified package; restored caches may contain older versions.
+if ($env:GITHUB_OUTPUT) {
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "installer=$($installer.FullName)"
 }

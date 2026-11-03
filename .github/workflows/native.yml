@@ -61,12 +61,13 @@ jobs:
       - name: Build the Windows installer
         run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --ci --no-sign -- --locked
       - name: Verify, install, launch, and uninstall
+        id: package
         shell: pwsh
         run: ./scripts/test-windows-package.ps1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: photo-foot-print-windows-x64-${{ github.sha }}
-          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          path: ${{ steps.package.outputs.installer }}
           if-no-files-found: error
           retention-days: 14
       # Keep compiled dependencies when a later test or packaging check fails.
