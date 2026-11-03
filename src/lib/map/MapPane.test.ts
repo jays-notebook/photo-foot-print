@@ -1,11 +1,27 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
+import { clearMocks, mockConvertFileSrc } from "@tauri-apps/api/mocks";
 import L from "leaflet";
 import MapPane from "./MapPane.svelte";
 
+beforeEach(() => mockConvertFileSrc("macos"));
 afterEach(() => {
   cleanup();
+  clearMocks();
   vi.restoreAllMocks();
+});
+
+test.each([
+  ["macos", "pfp-tile://localhost/osm/3/1/2.png"],
+  ["windows", "http://pfp-tile.localhost/osm/3/1/2.png"],
+] as const)("%s tile URLs preserve Leaflet coordinate substitution", (platform, expected) => {
+  mockConvertFileSrc(platform);
+  const createTileLayer = vi.spyOn(L, "tileLayer");
+  render(MapPane, {
+    initialCenter: { lat: 37, lng: 127 }, initialZoom: 3, onPinChange: vi.fn(),
+  });
+  const tiles = createTileLayer.mock.results[0].value as L.TileLayer;
+  expect(tiles.getTileUrl(Object.assign(L.point(1, 2), { z: 3 }))).toBe(expected);
 });
 
 test.each([

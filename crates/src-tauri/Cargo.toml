@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "A native macOS desktop app for one-photo-at-a-time geotagging of camera JPEGs."
+description = "A native macOS and Windows desktop app for one-photo-at-a-time geotagging of scanner JPEGs."
 default-run = "photo-foot-print"
 
 [lib]
@@ -24,6 +24,8 @@ thiserror = { workspace = true }
 
 # Phase 2 -- folder + photo list dependencies.
 tauri-plugin-dialog = { workspace = true }
+# Preserve raw native dismissal results for safe save confirmation.
+rfd = { version = "0.17.2", default-features = false, features = ["common-controls-v6"] }
 sha2 = { workspace = true }                     # for path-hash id used by the pfp-thumb:// id-map
 pfp-exif = { path = "../pfp-exif" }
 pfp-photos = { path = "../pfp-photos" }
@@ -40,3 +42,4 @@ http = "1"
 [dev-dependencies]
 # For the headless ipc_smoke integration test.
 tempfile = { workspace = true }
+image = { workspace = true }

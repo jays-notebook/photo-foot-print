@@ -50,6 +50,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::confirmation::confirm_save,
             // Phase 1 commands (kept — ipc_smoke depends on them).
             commands::exif::read_exif_summary,
             commands::exif::list_fixtures,

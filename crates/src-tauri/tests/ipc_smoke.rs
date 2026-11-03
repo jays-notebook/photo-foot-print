@@ -1,93 +1,107 @@
-//! Phase 1 IPC smoke test (headless).
-//!
-//! Per ARCHITECTURE.md §"Testing Seams" / RESEARCH.md Pattern 1, the
-//! `#[tauri::command]` wrappers are 5–15 lines that just delegate to pfp-exif.
-//! We unit-test pfp-exif directly (Plan 02). Here we just validate that the
-//! command body's *logic* — list fixtures, read summary, return DTO shape —
-//! works end-to-end against any user-supplied real fixture, without spinning
-//! up a webview.
-//!
-//! The actual webview-launch verification is the human-verify checkpoint
-//! later in this plan.
+//! Headless coverage of the library operations used by IPC commands.
+//! Actual webview/dialog interaction and private scanner metadata gates are separate.
 
-use std::path::PathBuf;
+use pfp_exif::{read_detail, read_summary, write_metadata, CaptureTimeChange};
+use pfp_photos::{cache, list_folder, thumbnail::decode_resize_encode};
 
-fn fixtures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures")
+#[path = "../../../tests/support/synthetic_jpeg.rs"]
+mod synthetic_jpeg;
+
+#[test]
+fn listed_unicode_photo_produces_a_decodable_cached_thumbnail() {
+    let (_temp, folder) = synthetic_jpeg::photo_folder();
+    let photo = folder.join("필름 사진 01.JPEG");
+    synthetic_jpeg::write_jpeg(&photo, 384, 192);
+    let original = std::fs::read(&photo).unwrap();
+
+    let listing = list_folder(&folder).expect("list synthetic folder");
+    assert_eq!(listing.items.len(), 1);
+    assert_eq!(listing.footer.read_failed, 0);
+    let entry = &listing.items[0];
+    assert_eq!(entry.file_name, "필름 사진 01.JPEG");
+    assert_eq!(entry.absolute_path, photo);
+    assert!(!entry.has_gps);
+    assert!(entry.capture_time.is_none());
+    assert!(listing.thumb_cache_writable);
+    assert!(!cache::cache_dir(&folder).exists());
+
+    let thumbnail = decode_resize_encode(&entry.absolute_path).expect("thumbnail");
+    cache::write_atomic(&folder, &entry.id, &thumbnail).expect("cache thumbnail");
+    let cached = cache::read_cached_thumbnail(&folder, &entry.id).expect("read cached thumbnail");
+    assert_eq!(cached, thumbnail);
+    let image = image::load_from_memory(&cached).expect("decode cached JPEG");
+    assert_eq!((image.width(), image.height()), (256, 128));
+    assert_eq!(std::fs::read(&photo).unwrap(), original);
+    assert_eq!(list_folder(&folder).unwrap().items.len(), 1);
 }
 
 #[test]
-fn read_summary_works_on_supplied_fixtures() {
-    // Walk fixture vendors. If none are supplied (fresh clone), the test no-ops.
-    let mut found_any = false;
-    for vendor in ["sony", "canon", "nikon"] {
-        let p = fixtures_root().join(vendor).join("sample.jpg");
-        if !p.exists() || std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) <= 1024 {
-            continue;
-        }
-        found_any = true;
+fn metadata_save_and_relist_preserve_compressed_image_bytes() {
+    let (_temp, folder) = synthetic_jpeg::photo_folder();
+    let photo = folder.join("필름 사진 02.jpg");
+    synthetic_jpeg::write_jpeg(&photo, 384, 192);
+    let original = std::fs::read(&photo).unwrap();
+    let original_scan = jpeg_scan(&original);
+    assert!(!read_summary(&photo).unwrap().has_gps);
+    assert!(read_detail(&photo).unwrap().capture_time.is_none());
 
-        // This is the same call the IPC command makes.
-        let summary = pfp_exif::read_summary(&p)
-            .unwrap_or_else(|e| panic!("[{vendor}] read_summary failed: {e:?}"));
+    for (lat, lng, change, expected_time) in [
+        (
+            37.5,
+            127.25,
+            CaptureTimeChange::Set("1995:06:07 08:09:10".into()),
+            Some("1995:06:07 08:09:10"),
+        ),
+        (
+            -33.875,
+            151.125,
+            CaptureTimeChange::Keep,
+            Some("1995:06:07 08:09:10"),
+        ),
+        (-34.625, -58.375, CaptureTimeChange::Remove, None),
+    ] {
+        write_metadata(&photo, lat, lng, None, change).expect("save metadata");
+        let detail = read_detail(&photo).expect("read saved metadata");
+        let (actual_lat, actual_lng) = detail.gps.expect("saved GPS");
+        assert!((actual_lat - lat).abs() < 0.000001);
+        assert!((actual_lng - lng).abs() < 0.000001);
+        assert_eq!(detail.capture_time.as_deref(), expected_time);
 
-        // SummaryDto would be constructed here by the command. We exercise the
-        // shape implicitly by reading the fields.
-        let _ = summary.has_gps;
-        let _ = summary.capture_time.clone();
-    }
-    if !found_any {
-        eprintln!("No fixtures supplied — see docs/FIXTURES.md. ipc_smoke noop.");
-    }
-}
+        let listing = list_folder(&folder).expect("relist saved photo");
+        assert_eq!(listing.items.len(), 1);
+        assert_eq!(listing.footer.read_failed, 0);
+        assert!(listing.items[0].has_gps);
+        assert_eq!(listing.items[0].capture_time.as_deref(), expected_time);
 
-/// Phase 2 lib-crate smoke: exercise the path Plan 04's `list_folder` and
-/// `read_photo_meta` IPC commands delegate to (`pfp_photos::list_folder` +
-/// `pfp_exif::read_detail`) without spinning up a webview.
-///
-/// The IPC command bodies themselves are not tested here -- consistent with
-/// Phase 1's testing seam (RESEARCH §Question 10 "What we deliberately DO
-/// NOT test").
-#[test]
-fn phase_2_list_folder_smoke_scanner_fixtures() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let scanner_dir = std::path::PathBuf::from(manifest_dir)
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures")
-        .join("scanner");
-
-    if !scanner_dir.exists() {
-        eprintln!("[phase_2_list_folder_smoke] scanner fixtures dir missing -- skipping.");
-        return;
-    }
-
-    let listing = pfp_photos::list_folder(&scanner_dir).expect("list_folder");
-    if listing.items.is_empty() {
-        eprintln!("[phase_2_list_folder_smoke] scanner fixtures dir empty -- skipping.");
-        return;
-    }
-
-    // D-10: scanner fixtures never have GPS.
-    for item in &listing.items {
+        let saved = std::fs::read(&photo).unwrap();
+        let saved_scan = jpeg_scan(&saved);
         assert!(
-            !item.has_gps,
-            "scanner fixture {} unexpectedly has GPS",
-            item.file_name
+            saved_scan == original_scan,
+            "compressed scan changed: original {} bytes, saved {} bytes, capture time {expected_time:?}",
+            original_scan.len(),
+            saved_scan.len()
         );
-        assert_eq!(item.id.len(), 32, "id length");
+        let decoded = image::load_from_memory(&saved).expect("decode saved photo");
+        assert_eq!((decoded.width(), decoded.height()), (384, 192));
     }
+}
 
-    // Per-item read_detail also yields gps == None.
-    let first = &listing.items[0];
-    let detail = pfp_exif::read_detail(&first.absolute_path).expect("read_detail");
-    assert!(
-        detail.gps.is_none(),
-        "detail.gps must be None for scanner fixtures"
-    );
+/// Parse header segment lengths so a marker-looking byte in metadata cannot
+/// be mistaken for the start of the compressed scan. The fixture is baseline JPEG.
+/// Keep the complete suffix: this encoder adds no trailer, so new bytes after EOI
+/// are also a regression (for example, a missing truncation after shrinking EXIF).
+fn jpeg_scan(bytes: &[u8]) -> &[u8] {
+    assert!(bytes.starts_with(&[0xff, 0xd8]));
+    assert!(bytes.ends_with(&[0xff, 0xd9]));
+    let mut offset = 2;
+    while offset + 4 <= bytes.len() {
+        assert_eq!(bytes[offset], 0xff, "invalid JPEG header marker");
+        if bytes[offset + 1] == 0xda {
+            return &bytes[offset..];
+        }
+        let length = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        assert!(length >= 2 && offset + 2 + length <= bytes.len());
+        offset += 2 + length;
+    }
+    panic!("synthetic JPEG has no compressed scan");
 }

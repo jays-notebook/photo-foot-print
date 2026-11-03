@@ -110,6 +110,11 @@ export type CaptureTimeChange =
   | { kind: "set"; value: string }
   | { kind: "remove" };
 
+/** Only an explicit native Save selection returns true; dismissal fails closed. */
+export async function confirmSave(title: string, message: string): Promise<boolean> {
+  return await invoke<boolean>("confirm_save", { title, message });
+}
+
 /** Save GPS and an explicit capture-time operation in one atomic photo write. */
 export async function saveGeotag(
   id: string,

@@ -1,23 +1,5 @@
-// src/lib/save/saveDialog.test.ts
-//
-// Phase 4 (UI-SPEC §14): unit tests for the widened saveDialog body builder
-// + title flip + inverted-semantics lock. Pitfall 9 regression guard.
-//
-// We test buildSaveDialogBody / buildSaveDialogTitle (exported pure helpers)
-// and assert that confirmSaveGeotag's ask() call shape preserves the
-// inverted-semantics labels on every body branch via a mock of
-// @tauri-apps/plugin-dialog.
-
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock @tauri-apps/plugin-dialog BEFORE importing saveDialog so the
-// confirmSaveGeotag tests can capture the ask() options.
-const askMock = vi.fn();
-const messageMock = vi.fn();
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  ask: (...args: unknown[]) => askMock(...args),
-  message: (...args: unknown[]) => messageMock(...args),
-}));
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
 import {
   buildSaveDialogBody,
@@ -25,6 +7,8 @@ import {
   confirmSaveGeotag,
   type SaveDialogProps,
 } from "./saveDialog";
+
+afterEach(clearMocks);
 
 function basePropsCoordsOnly(): SaveDialogProps {
   return {
@@ -123,11 +107,7 @@ describe("buildSaveDialogBody", () => {
   });
 });
 
-describe("confirmSaveGeotag — inverted-semantics lock (Pitfall 9)", () => {
-  beforeEach(() => {
-    askMock.mockReset();
-  });
-
+describe("confirmSaveGeotag — native confirmation boundary", () => {
   const branches: Array<[string, () => SaveDialogProps]> = [
     ["coords-only", basePropsCoordsOnly],
     ["dto-only", basePropsDtoOnly],
@@ -135,28 +115,26 @@ describe("confirmSaveGeotag — inverted-semantics lock (Pitfall 9)", () => {
   ];
 
   for (const [name, makeProps] of branches) {
-    it(`${name}: ask() called with okLabel='Cancel', cancelLabel='Save', kind='warning'`, async () => {
-      askMock.mockResolvedValue(true); // user clicked default ("Cancel")
-      await confirmSaveGeotag(makeProps());
-      expect(askMock).toHaveBeenCalledTimes(1);
-      const [, options] = askMock.mock.calls[0];
-      expect(options).toMatchObject({
-        kind: "warning",
-        okLabel: "Cancel",
-        cancelLabel: "Save",
+    it(`${name}: sends the reviewed values to the raw-result confirmation command`, async () => {
+      const nativeCommand = vi.fn(() => false);
+      mockIPC(nativeCommand);
+      const props = makeProps();
+      await confirmSaveGeotag(props);
+      expect(nativeCommand).toHaveBeenCalledExactlyOnceWith("confirm_save", {
+        title: buildSaveDialogTitle(props),
+        message: buildSaveDialogBody(props),
       });
     });
   }
 
-  it("confirm-flips-bool: ask()→true means user cancelled (returns false)", async () => {
-    askMock.mockResolvedValue(true);
+  it.each([false, true])("preserves the native approval result %s without inversion", async (approved) => {
+    mockIPC(() => approved);
     const result = await confirmSaveGeotag(basePropsBoth());
-    expect(result).toBe(false);
+    expect(result).toBe(approved);
   });
 
-  it("confirm-flips-bool: ask()→false means user confirmed (returns true)", async () => {
-    askMock.mockResolvedValue(false);
-    const result = await confirmSaveGeotag(basePropsBoth());
-    expect(result).toBe(true);
+  it("does not approve when the native confirmation command fails", async () => {
+    mockIPC(() => { throw new Error("window unavailable"); });
+    await expect(confirmSaveGeotag(basePropsBoth())).rejects.toThrow("window unavailable");
   });
 });

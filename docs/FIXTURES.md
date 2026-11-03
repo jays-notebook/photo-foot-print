@@ -7,11 +7,19 @@ Use scanner output from your normal workflow, including Photoshop-processed
 files with ICC, XMP, and IPTC metadata. Files must exceed 1 KB to exclude
 old Git LFS pointer stubs; production examples are normally several MB.
 
-Install ExifTool (`brew install exiftool`) and run:
+Install [ExifTool](https://exiftool.org/) (`brew install exiftool` on macOS)
+and ensure `exiftool` is on PATH. On macOS, run:
 
 ```sh
 make test-gate
 make test-fault
+```
+
+On Windows PowerShell, use the equivalent commands without GNU make:
+
+```powershell
+cargo test -p pfp-exif --test metadata_preservation --test round_trip --test strict_4_predicate -- --include-ignored
+cargo test -p pfp-exif --test fault_injection --features fault-injection -- --include-ignored
 ```
 
 `test-gate` runs metadata preservation, GPS hemisphere round trips, and
@@ -29,6 +37,12 @@ EXIF fixture-dependent tests are explicitly marked ignored in normal
 with an actionable error if no usable scanner fixture exists. They never
 silently return success when fixtures are missing. Synthetic JPEG tests
 and fixture-discovery failure tests run without private photos.
+
+Portable list/thumbnail/host smoke tests generate real JPEGs from a pixel
+pattern in temporary directories using `tests/support/synthetic_jpeg.rs`.
+They never fill the private scanner directory with synthetic substitutes.
+The separate scanner-only photo-list assertion is explicitly ignored unless
+requested and fails when no local scanner fixture exists.
 
 The shared EXIF fixture helper uses only `tests/fixtures/scanner/`; old
 Sony/Canon/Nikon fixture directories are not part of the product scope.

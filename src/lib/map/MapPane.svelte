@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
   import "./leaflet-icon-fix";
@@ -36,7 +37,8 @@
       attributionControl: false,
     }).setView([initialCenter.lat, initialCenter.lng], initialZoom);
 
-    L.tileLayer("pfp-tile://osm/{z}/{x}/{y}.png", {
+    // Convert only the base: encoding the whole template would hide Leaflet's placeholders.
+    L.tileLayer(`${convertFileSrc("", "pfp-tile")}osm/{z}/{x}/{y}.png`, {
       maxZoom: 19,
       // D-35 / Pitfall 5: do NOT prefetch off-viewport tiles.
       keepBuffer: 0,

@@ -112,6 +112,25 @@ fn save_overwrites_existing() {
 }
 
 #[test]
+fn unicode_state_and_photo_paths_survive_repeated_saves() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("앱 상태 📷").join("state.json");
+    let mut state = AppState {
+        last_folder: Some(tmp.path().join("스캔 사진").join("서울 1990")),
+        ..AppState::default()
+    };
+    save_to(&path, &state).unwrap();
+    state.last_pin = Some((37.0, 127.0));
+    save_to(&path, &state).unwrap();
+
+    assert_eq!(load_from(&path).unwrap(), state);
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        1
+    );
+}
+
+#[test]
 fn save_last_folder_preserves_pin_in_isolated_state() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("state.json");

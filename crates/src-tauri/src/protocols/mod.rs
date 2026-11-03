@@ -5,3 +5,13 @@
 
 pub mod thumb;
 pub mod tile;
+
+/// Both native schemes and Windows WebView2 HTTP origins reach handlers in this
+/// normalized form: <scheme>://localhost/<path>. Keep paths separate from hosts
+/// so convertFileSrc can provide the platform-specific origin without file I/O.
+fn local_protocol_path<'a>(uri: &'a http::Uri, scheme: &str) -> Option<&'a str> {
+    if uri.scheme_str() != Some(scheme) || uri.authority()?.as_str() != "localhost" {
+        return None;
+    }
+    Some(uri.path())
+}

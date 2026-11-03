@@ -2,7 +2,8 @@
 //! pfp-tiles disk cache, with stale-while-revalidate against upstream
 //! tile.openstreetmap.org (User-Agent set by pfp-tiles per OSMF policy).
 //!
-//! Wire shape: pfp-tile://osm/{z}/{x}/{y}.png
+//! Normalized wire shape: pfp-tile://localhost/osm/{z}/{x}/{y}.png.
+//! WebView2 uses http://pfp-tile.localhost/osm/...; Wry normalizes it for us.
 //!   200 image/png + cache-control on hit (fresh OR stale-served)
 //!   400 on malformed URL (bad host, bad z/x/y, missing .png, z>19, extra path)
 //!   502 on cache miss + upstream fetch failure (D-34)
@@ -58,6 +59,12 @@ pub(crate) fn parse_zxy(path: &str) -> Option<(u8, u32, u32)> {
     Some((z, x, y))
 }
 
+fn parse_tile_uri(uri: &http::Uri) -> Option<(u8, u32, u32)> {
+    let path = super::local_protocol_path(uri, "pfp-tile")?;
+    // parse_zxy requires the slash after the provider, rejecting /osm-extra/...
+    parse_zxy(path.strip_prefix("/osm")?)
+}
+
 pub fn handle<R: tauri::Runtime>(
     ctx: UriSchemeContext<'_, R>,
     request: http::Request<Vec<u8>>,
@@ -65,19 +72,7 @@ pub fn handle<R: tauri::Runtime>(
 ) {
     let app: AppHandle<R> = ctx.app_handle().clone();
     tauri::async_runtime::spawn(async move {
-        let url = request.uri();
-
-        // Delta vs thumb.rs: host MUST be "osm" (forward-compat for future
-        // tile providers — never mix per-provider sidecars).
-        let host = url.host().unwrap_or("");
-        if host != "osm" {
-            respond(responder, 400, None, None, Vec::new());
-            return;
-        }
-
-        // Delta vs thumb.rs: parse path as /z/x/y.png with strict checks.
-        let path = url.path();
-        let (z, x, y) = match parse_zxy(path) {
+        let (z, x, y) = match parse_tile_uri(request.uri()) {
             Some(t) => t,
             None => {
                 respond(responder, 400, None, None, Vec::new());
@@ -126,6 +121,35 @@ pub fn handle<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tile_coordinates_come_from_the_normalized_uri_path() {
+        // Wry normalizes Windows http://pfp-tile.localhost/... to this URI.
+        let uri = "pfp-tile://localhost/osm/14/13708/6334.png"
+            .parse()
+            .unwrap();
+        assert_eq!(parse_tile_uri(&uri), Some((14, 13708, 6334)));
+    }
+
+    #[test]
+    fn tile_uri_rejects_unexpected_origins_and_providers() {
+        for value in [
+            "pfp-tile://osm/14/13708/6334.png",
+            "pfp-tile://other/osm/14/13708/6334.png",
+            "pfp-tile://localhost:80/osm/14/13708/6334.png",
+            "pfp-tile://user@localhost/osm/14/13708/6334.png",
+            "http://localhost/osm/14/13708/6334.png",
+            "pfp-tile://localhost/other/14/13708/6334.png",
+            "pfp-tile://localhost/osm-extra/14/13708/6334.png",
+            "pfp-tile://localhost/osm/../13708/6334.png",
+            "pfp-tile://localhost/osm/14/13708/6334.png/extra",
+        ] {
+            assert!(
+                parse_tile_uri(&value.parse().unwrap()).is_none(),
+                "accepted {value}"
+            );
+        }
+    }
 
     #[test]
     fn parse_zxy_happy_path() {

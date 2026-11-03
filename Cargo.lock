@@ -2591,7 +2591,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pfp-exif"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "kamadak-exif",
@@ -2600,11 +2600,12 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "pfp-photos"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "fast_image_resize",
  "image",
@@ -2617,7 +2618,7 @@ dependencies = [
 
 [[package]]
 name = "pfp-state"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "dirs",
  "serde",
@@ -2628,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "pfp-tiles"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "httpmock",
  "reqwest",
@@ -2694,13 +2695,15 @@ dependencies = [
 
 [[package]]
 name = "photo-foot-print"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "http",
+ "image",
  "pfp-exif",
  "pfp-photos",
  "pfp-state",
  "pfp-tiles",
+ "rfd",
  "serde",
  "serde_json",
  "sha2 0.11.1",

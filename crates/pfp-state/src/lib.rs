@@ -102,7 +102,8 @@ pub fn save(state: &AppState) -> Result<(), StateError> {
 ///   1. Create parent dir if missing (`fs::create_dir_all`).
 ///   2. Open a sibling tempfile in the same dir (`.state-XXXX.json.tmp`).
 ///   3. Write JSON; flush; file fsync.
-///   4. `persist(target)` (atomic rename on POSIX; AtomicReplaceFile on Windows).
+///   4. `persist(target)` atomically replaces the target on the same filesystem.
+///      tempfile uses MoveFileExW with REPLACE_EXISTING on Windows.
 ///
 /// Survives mid-write process kill: either the original is intact OR the new
 /// version is fully written. No torn intermediate state.

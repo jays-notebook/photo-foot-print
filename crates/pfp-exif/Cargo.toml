@@ -16,6 +16,9 @@ tempfile = { workspace = true }   # Plan 03: sibling NamedTempFile in atomic::wr
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }       # Plan 03: libc::fcntl(F_FULLFSYNC) on macOS
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [features]
 default = []
 # Cross-crate-reachable fault-injection hook for the durability integration test.
