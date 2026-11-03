@@ -4,9 +4,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Revisit major upgrades when svelte-check supports TypeScript 7+.
+      # Compatible TypeScript 6 minor/patch updates remain enabled.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       svelte-tooling:
-        patterns: ['svelte', '@sveltejs/*', 'vite', 'vitest', '@vitest/*']
+        patterns: ['svelte', 'svelte-check', '@sveltejs/*', '@tsconfig/svelte', 'typescript', 'vite', 'vitest', '@vitest/*']
       tauri:
         patterns: ['@tauri-apps/*']
   - package-ecosystem: cargo
