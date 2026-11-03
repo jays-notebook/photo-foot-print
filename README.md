@@ -35,7 +35,9 @@ Install Rust through [rustup](https://rustup.rs/). The project pins Rust 1.99.1
 in `rust-toolchain.toml`, including rustfmt and Clippy. Run commands from this
 repository so rustup selects the pinned toolchain. The workspace's minimum
 supported Rust version matches this tested toolchain.
-Node.js 22.12+ on the 22.x line, 24.x, or 26+ is required by the frontend tools.
+Node.js 22.22.2+ on the 22.x line, 24.15+ on the 24.x line, or 26+ is required
+by the frontend test tools. TypeScript stays on 6.x while `svelte-check` does
+not support 7.x; Dependabot major TypeScript upgrades require a compatibility review.
 
 On macOS, install the Xcode Command Line Tools and ExifTool for the optional
 private scanner fixture gate:

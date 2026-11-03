@@ -17,4 +17,4 @@ tempfile = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-httpmock = "0.7"
+httpmock = "0.9"
