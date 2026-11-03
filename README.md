@@ -5,15 +5,19 @@ film/slide-scanner-output JPEGs (NORITSU-class scanners, typically
 Photoshop-processed) that lack EXIF GPS coordinates. Pick a photo, click a spot
 on a map (or paste lat/lng), and the GPS lands in the original JPEG.
 
-Built for a personal film workflow, with a local macOS app bundle and a
-per-user Windows NSIS installer. Builds are unsigned; no notarization or
-automatic update service is configured.
+Built for a personal film workflow, with a universal macOS app bundle and a
+per-user Windows NSIS installer. Downloads are available through
+[GitHub Releases](https://github.com/jays-notebook/photo-foot-print/releases/latest).
+Windows builds are unsigned; macOS builds use ad-hoc signing without Apple
+notarization. No automatic update service is configured.
 
 ## Status
 
-v1.0 shipped on macOS on 2026-06-23. Windows 10/11 x64 support uses system
-WebView2 and native Windows CI. See [Windows setup and validation](docs/WINDOWS.md)
-for prerequisites, installer output, and the distinction between CI and desktop checks.
+v1.0 shipped on macOS on 2026-06-23. v1.1.0 adds Windows 10/11 x64 support
+using system WebView2 and a universal macOS download for Apple Silicon and
+Intel Macs. See [downloads and installation](docs/RELEASES.md) for package and
+signing details, and [Windows setup and validation](docs/WINDOWS.md) for the
+distinction between native CI and desktop checks.
 
 ## Features
 
@@ -52,7 +56,7 @@ as described in [WINDOWS.md](docs/WINDOWS.md). Then, on either platform:
 
 ```sh
 rustup show active-toolchain
-npm ci
+npm ci --engine-strict
 npm run tauri -- dev
 ```
 
@@ -75,4 +79,4 @@ automatic checks, and reviewed upstream findings.
 
 - Tauri 2 + system WebKit on macOS and Evergreen WebView2 on Windows; no bundled Chromium or fixed WebView2 runtime.
 - The four `pfp-*` library crates carry zero `tauri::*` symbols.
-- JPEG-only, one-photo-at-a-time editing. Linux, Windows ARM64, batch editing and signed releases are separate scope decisions.
+- JPEG-only, one-photo-at-a-time editing. Linux, Windows ARM64, batch editing, publisher signing and notarization are separate scope decisions.

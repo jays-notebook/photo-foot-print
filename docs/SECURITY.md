@@ -97,8 +97,7 @@ patch is published; do not override it with an incompatible package.
 
 ### Rust maintenance and platform warnings
 
-The full lockfile also reports discontinued `async-std` (via the test-only
-httpmock), unmaintained `paste` and `proc-macro-error`, and the `glib` iterator
+The full lockfile also reports unmaintained `paste` and `proc-macro-error`, and the `glib` iterator
 unsoundness advisory RUSTSEC-2024-0429. The glib dependency is absent from the
 macOS and Windows build graphs. These warnings are not suppressed or described as fixed;
 review upstream replacements and reassess before supporting Linux.

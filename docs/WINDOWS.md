@@ -4,6 +4,9 @@ The Windows application uses Microsoft Evergreen WebView2 and the same Rust
 JPEG pipeline as macOS. It does not bundle Chromium or a fixed WebView2
 runtime. Windows ARM64, 32-bit Windows, and Linux are not supported targets.
 
+For the per-user installer, see [downloads and installation](RELEASES.md).
+Developer tools below are needed only to build from source.
+
 ## Developer prerequisites
 
 Install:
@@ -14,7 +17,7 @@ Install:
 - [Rustup](https://rustup.rs/) with the MSVC host toolchain. The repository
   selects Rust 1.99.1, rustfmt and Clippy automatically. `rustc -vV` should
   report host `x86_64-pc-windows-msvc`.
-- Node.js 22.12+ on the 22.x line, 24.x, or 26+.
+- Node.js 22.22.2+ on the 22.x line, 24.15+ on the 24.x line, or 26+.
 - [NASM](https://www.nasm.us/) on PATH. The TLS backend's aws-lc-sys build uses
   it for x64 assembly; `nasm -v` must succeed before building. Restart the
   terminal after changing PATH. See the [AWS-LC Windows requirements](https://aws.github.io/aws-lc-rs/requirements/windows.html).
@@ -32,7 +35,7 @@ From the repository root in PowerShell:
 
 ```powershell
 rustup show active-toolchain
-npm ci
+npm ci --engine-strict
 npm run tauri -- dev
 ```
 
@@ -46,9 +49,10 @@ The installer is written to
 `target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe`.
 `tauri.windows.conf.json` selects NSIS, current-user installation and the
 downloaded WebView2 bootstrapper. The ordinary macOS build still selects
-the `.app` target. No certificate, public release or auto-update feed is
-configured. Windows may show an unsigned-publisher/SmartScreen prompt;
-signing is a separate release task.
+the `.app` target. GitHub Releases provide the installer; no signing
+certificate or auto-update feed is configured. Windows may show an
+unsigned-publisher/SmartScreen prompt. Publisher signing remains a separate
+release task.
 
 State is stored beneath `%LOCALAPPDATA%\photo-foot-print`. Thumbnail cache
 files are stored beside photos under `.pfp-thumbs`; read-only folders use the

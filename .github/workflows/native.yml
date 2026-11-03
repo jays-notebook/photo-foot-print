@@ -50,7 +50,7 @@ jobs:
           restore-keys: |
             windows-msvc-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
             windows-msvc-
-      - run: npm ci
+      - run: npm ci --engine-strict
       - run: npm run check
       - run: npm test
       - run: cargo fmt --all -- --check
@@ -70,6 +70,62 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       # Keep compiled dependencies when a later test or packaging check fails.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+  macos:
+    name: macOS universal
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install both macOS Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rust-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-15-${{ runner.arch }}-universal-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            macos-15-${{ runner.arch }}-universal-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+            macos-15-${{ runner.arch }}-universal-
+      - run: npm ci --engine-strict
+      - run: npm run check
+      - run: npm test
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Atomic-save fault tests without private scanner fixtures
+        run: cargo test -p pfp-exif --test fault_injection --features fault-injection --locked
+      - name: Build the universal macOS app
+        run: npm run tauri -- build --target universal-apple-darwin --bundles app --ci --no-sign -- --locked
+      - name: Verify, launch, and archive the app
+        id: package
+        run: |
+          bash scripts/test-macos-package.sh
+          node -p '"version=" + require("./package.json").version' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: photo-foot-print-macos-universal-${{ github.sha }}
+          path: target/release-artifacts/photo-foot-print_${{ steps.package.outputs.version }}_macos-universal.app.zip
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && steps.rust-cache.outputs.cache-hit != 'true' && steps.rust-cache.outputs.cache-primary-key != '' }}
         with:
