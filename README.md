@@ -13,9 +13,10 @@ notarization. No automatic update service is configured.
 
 ## Status
 
-v1.0 shipped on macOS on 2026-06-23. v1.1.0 adds Windows 10/11 x64 support
+v1.0 shipped on macOS on 2026-06-23. v1.1.0 introduced Windows 10/11 x64 support
 using system WebView2 and a universal macOS download for Apple Silicon and
-Intel Macs. See [downloads and installation](docs/RELEASES.md) for package and
+Intel Macs. v1.1.1 replaces the blank application icon with a photo frame and
+map pin. See [downloads and installation](docs/RELEASES.md) for package and
 signing details, and [Windows setup and validation](docs/WINDOWS.md) for the
 distinction between native CI and desktop checks.
 

@@ -9,8 +9,21 @@ version=$(node -p 'require(process.argv[1]).version' "$repo_root/package.json")
 plist="$bundle/Contents/Info.plist"
 plist_read() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
 
+verify_bundle_icon() {
+  local checked_bundle="$1" icon_name icon_path
+  icon_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$checked_bundle/Contents/Info.plist")
+  [[ -n "$icon_name" && "$icon_name" != */* ]]
+  icon_path="$checked_bundle/Contents/Resources/$icon_name"
+  if [[ ! -f "$icon_path" && "$icon_name" != *.icns ]]; then
+    icon_path="$icon_path.icns"
+  fi
+  [[ -s "$icon_path" ]]
+  cmp "$repo_root/crates/src-tauri/icons/icon.icns" "$icon_path"
+}
+
 [[ $(plist_read CFBundleShortVersionString) == "$version" ]]
 [[ $(plist_read CFBundleVersion) == "$version" ]]
+verify_bundle_icon "$bundle"
 binary="$bundle/Contents/MacOS/$(plist_read CFBundleExecutable)"
 [[ -x "$binary" ]]
 architectures=$(/usr/bin/lipo -archs "$binary")
@@ -59,7 +72,8 @@ rm -f "$archive"
 /usr/bin/ditto -x -k "$archive" "$scratch/unpacked"
 unpacked="$scratch/unpacked/$(basename "$bundle")"
 /usr/bin/codesign --verify --deep --strict --all-architectures "$unpacked"
+verify_bundle_icon "$unpacked"
 unpacked_binary="$unpacked/Contents/MacOS/$(plist_read CFBundleExecutable)"
 [[ -x "$unpacked_binary" ]]
 cmp "$binary" "$unpacked_binary"
-echo "Verified version $version, architectures $architectures, native launch, and archive integrity: $archive"
+echo "Verified version $version, architectures $architectures, app icon, native launch, and archive integrity: $archive"
