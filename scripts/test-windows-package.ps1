@@ -25,6 +25,97 @@ $builtApp = Get-Item -LiteralPath $appPath
 $builtAppHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
 Write-Host ("Build EXE: {0} bytes; SHA256 {1}; {2}" -f $builtApp.Length, $builtAppHash, $builtApp.FullName)
 
+# Tauri embeds the application ICO as icon group 32512. Read resources without
+# executing the EXE, and compare every frame with the reviewed source artwork.
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class PfpIconResources {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    public static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern uint SizeofResource(IntPtr module, IntPtr resource);
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern IntPtr LockResource(IntPtr resource);
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FreeLibrary(IntPtr module);
+
+    public static byte[] Read(IntPtr module, ushort type, ushort id) {
+        IntPtr resource = FindResourceW(module, new IntPtr(id), new IntPtr(type));
+        if (resource == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        uint size = SizeofResource(module, resource);
+        if (size == 0) throw new InvalidOperationException("The icon resource is empty");
+        IntPtr loaded = LoadResource(module, resource);
+        if (loaded == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr data = LockResource(loaded);
+        if (data == IntPtr.Zero) throw new InvalidOperationException("Cannot read the icon resource");
+        byte[] bytes = new byte[checked((int)size)];
+        Marshal.Copy(data, bytes, 0, bytes.Length);
+        return bytes;
+    }
+}
+'@
+
+$iconPath = Join-Path $PSScriptRoot '../crates/src-tauri/icons/icon.ico'
+$iconBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $iconPath))
+if ($iconBytes.Length -lt 6 -or [BitConverter]::ToUInt16($iconBytes, 0) -ne 0 -or
+    [BitConverter]::ToUInt16($iconBytes, 2) -ne 1) {
+    throw 'Source icon must have a valid ICO header'
+}
+$iconCount = [BitConverter]::ToUInt16($iconBytes, 4)
+$iconDirectoryEnd = 6 + 16 * $iconCount
+if ($iconCount -eq 0 -or $iconBytes.Length -lt $iconDirectoryEnd) {
+    throw 'Source ICO must contain a complete, nonempty image directory'
+}
+# LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE.
+$iconModule = [PfpIconResources]::LoadLibraryExW($builtApp.FullName, [IntPtr]::Zero, 0x22)
+if ($iconModule -eq [IntPtr]::Zero) {
+    throw "Cannot open application icon resources: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
+try {
+    $group = [PfpIconResources]::Read($iconModule, 14, 32512)
+    if ($group.Length -lt 6 -or [BitConverter]::ToUInt16($group, 0) -ne 0 -or
+        [BitConverter]::ToUInt16($group, 2) -ne 1 -or
+        [BitConverter]::ToUInt16($group, 4) -ne $iconCount -or
+        $group.Length -lt 6 + 14 * $iconCount) {
+        throw 'Application icon group does not match the source ICO directory'
+    }
+    for ($index = 0; $index -lt $iconCount; $index++) {
+        $sourceEntry = 6 + 16 * $index
+        $groupEntry = 6 + 14 * $index
+        [uint64]$frameSize = [BitConverter]::ToUInt32($iconBytes, $sourceEntry + 8)
+        [uint64]$frameOffset = [BitConverter]::ToUInt32($iconBytes, $sourceEntry + 12)
+        if ($frameSize -eq 0 -or $frameOffset -lt $iconDirectoryEnd -or
+            $frameOffset + $frameSize -gt $iconBytes.Length) {
+            throw "Source ICO frame $index has an invalid image range"
+        }
+        if ($group[$groupEntry] -ne $iconBytes[$sourceEntry] -or
+            $group[$groupEntry + 1] -ne $iconBytes[$sourceEntry + 1] -or
+            [BitConverter]::ToUInt32($group, $groupEntry + 8) -ne $frameSize) {
+            throw "Application icon frame $index has different dimensions or size"
+        }
+        $resourceId = [BitConverter]::ToUInt16($group, $groupEntry + 12)
+        $actual = [PfpIconResources]::Read($iconModule, 3, $resourceId)
+        $expected = [byte[]]::new([int]$frameSize)
+        [System.Array]::Copy($iconBytes, [long]$frameOffset, $expected, 0L, [long]$frameSize)
+        $expectedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($expected))
+        $actualHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($actual))
+        if ($actual.Length -ne $frameSize -or $actualHash -ne $expectedHash) {
+            throw "Application icon frame $index differs from the source ICO artwork"
+        }
+    }
+} finally {
+    $null = [PfpIconResources]::FreeLibrary($iconModule)
+}
+Write-Host "Verified all $iconCount application icon frames against the source ICO."
+
 # Model the unsigned NSIS patch without changing the build output on disk.
 # Tauri replaces this fixed-length marker, packages the EXE, then restores it:
 # https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle.rs

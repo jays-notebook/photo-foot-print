@@ -1,12 +1,13 @@
 # Downloads and installation
 
 Download packages from [GitHub Releases](https://github.com/jays-notebook/photo-foot-print/releases/latest).
-v1.1.0 provides:
+v1.1.1 replaces the blank application icon with a photo frame and map pin.
+It provides:
 
 | Asset | Platform |
 | --- | --- |
-| `photo-foot-print_1.1.0_x64-setup.exe` | Windows 10/11 x64, per-user NSIS installer |
-| `photo-foot-print_1.1.0_macos-universal.app.zip` | macOS, Apple Silicon and Intel |
+| `photo-foot-print_1.1.1_x64-setup.exe` | Windows 10/11 x64, per-user NSIS installer |
+| `photo-foot-print_1.1.1_macos-universal.app.zip` | macOS, Apple Silicon and Intel |
 | `SHA256SUMS` | SHA-256 hashes of both packages |
 
 The application uses the operating system's webview: WebKit on macOS and
@@ -41,13 +42,13 @@ Download `SHA256SUMS` from the same release and compare the package's hash
 with its entry. On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\photo-foot-print_1.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\photo-foot-print_1.1.1_x64-setup.exe -Algorithm SHA256
 ```
 
 On macOS:
 
 ```sh
-shasum -a 256 photo-foot-print_1.1.0_macos-universal.app.zip
+shasum -a 256 photo-foot-print_1.1.1_macos-universal.app.zip
 ```
 
 Checksums detect a damaged or mismatched download; they do not replace
