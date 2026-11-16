@@ -25,7 +25,7 @@ thiserror = { workspace = true }
 # Phase 2 -- folder + photo list dependencies.
 tauri-plugin-dialog = { workspace = true }
 # Preserve raw native dismissal results for safe save confirmation.
-rfd = { version = "0.17.2", default-features = false, features = ["common-controls-v6"] }
+rfd = { version = "0.18.0", default-features = false, features = ["common-controls-v6"] }
 sha2 = { workspace = true }                     # for path-hash id used by the pfp-thumb:// id-map
 pfp-exif = { path = "../pfp-exif" }
 pfp-photos = { path = "../pfp-photos" }
